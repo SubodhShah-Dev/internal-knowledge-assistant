@@ -249,13 +249,4 @@ Possible enhancements after the MVP:
 
 ## Notes
 
-This project is intentionally scoped to be realistic but achievable in a short time. The goal is not to build a huge enterprise system in one week, but to build a working, explainable, and credible document Q&A application with real backend logic and a local LLM.
-
----
-
-If you want, I can also help with the next steps:
-- create the backend folder structure
-- scaffold the frontend app
-- add the first API route and database schema
-- write the day-by-day 1-week build plan
-- generate project starter files for this repo
+This project is intentionally scoped to be realistic but achievable in a short time. The goal is not to build a huge enterprise system in one week, but to build a working, explainable, and credible document Q&A application with real backend logic and a cloud/local LLM.
