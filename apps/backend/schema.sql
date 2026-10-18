@@ -1,0 +1,41 @@
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+CREATE TABLE IF NOT EXISTS users (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  email text NOT NULL UNIQUE,
+  password_hash text NOT NULL,
+  role text NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS documents (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  owner_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title text NOT NULL,
+  original_name text NOT NULL,
+  stored_path text NOT NULL,
+  mime_type text NOT NULL,
+  byte_size bigint NOT NULL CHECK (byte_size > 0),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS document_chunks (
+  id bigserial PRIMARY KEY,
+  document_id uuid NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  chunk_index integer NOT NULL,
+  content text NOT NULL,
+  page_number integer,
+  search_vector tsvector GENERATED ALWAYS AS (to_tsvector('english', content)) STORED,
+  UNIQUE (document_id, chunk_index)
+);
+
+CREATE INDEX IF NOT EXISTS document_chunks_search_gin ON document_chunks USING GIN(search_vector);
+CREATE INDEX IF NOT EXISTS documents_owner_idx ON documents(owner_id);
+
+CREATE TABLE IF NOT EXISTS qa_history (
+  id bigserial PRIMARY KEY,
+  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  question text NOT NULL,
+  answer text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);

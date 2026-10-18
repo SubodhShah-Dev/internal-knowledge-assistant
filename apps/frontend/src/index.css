@@ -1,0 +1,125 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Arial, Helvetica, sans-serif;
+  background: #f4f7fb;
+  color: #1d2433;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.card {
+  width: min(900px, 100%);
+  background: white;
+  border: 1px solid #dfe6f0;
+  border-radius: 16px;
+  box-shadow: 0 12px 30px rgba(21, 38, 63, 0.08);
+  padding: 24px;
+}
+
+h1 {
+  margin-top: 0;
+  font-size: 2rem;
+}
+
+.subtitle {
+  color: #53627a;
+  margin-bottom: 20px;
+}
+
+.auth-box,
+.upload-box,
+.question-box,
+.answer-box,
+.sources-box {
+  margin-top: 20px;
+  padding: 16px;
+  border: 1px solid #ebf0f6;
+  border-radius: 12px;
+  background: #fafcff;
+}
+
+.row {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 12px;
+}
+
+.row label {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+input,
+textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #d8dfeb;
+  background: white;
+}
+
+textarea {
+  resize: vertical;
+}
+
+.actions,
+.upload-box,
+.question-box {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+button {
+  border: none;
+  background: #2d6cdf;
+  color: white;
+  cursor: pointer;
+  padding: 10px 16px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+
+button.secondary {
+  background: #edf3ff;
+  color: #1d4fb8;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.status {
+  margin-top: 18px;
+  color: #2b567b;
+  font-weight: 600;
+}
+
+.answer-box p,
+.source-item p {
+  white-space: pre-wrap;
+  line-height: 1.6;
+}
+
+.source-item {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #e8edf4;
+}

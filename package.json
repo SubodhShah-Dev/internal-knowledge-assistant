@@ -1,0 +1,18 @@
+{
+  "name": "internal-knowledge-assistant",
+  "private": true,
+  "workspaces": [
+    "apps/frontend",
+    "apps/backend"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n api,web \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "npm run dev -w apps/backend",
+    "dev:web": "npm run dev -w apps/frontend",
+    "test": "npm run test -w apps/backend",
+    "build": "npm run build -w apps/backend && npm run build -w apps/frontend"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
