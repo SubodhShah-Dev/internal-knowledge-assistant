@@ -1,5 +1,5 @@
 import bcrypt from 'bcrypt';
-import { pool } from '../db';
+import { pool } from './db';
 
 async function seed() {
   const passwordHash = await bcrypt.hash('DemoPassword123!', 12);
