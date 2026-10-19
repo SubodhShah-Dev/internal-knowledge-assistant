@@ -47,12 +47,96 @@ h1 {
 .question-box,
 .answer-box,
 .sources-box,
-.documents-box {
+.documents-box,
+.verification-box {
   margin-top: 20px;
   padding: 16px;
   border: 1px solid #ebf0f6;
   border-radius: 12px;
   background: #fafcff;
+}
+
+.badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.badge-verified,
+.badge-supported {
+  background: #e3f5ea;
+  color: #1a7f4b;
+}
+
+.badge-partial {
+  background: #fff4d6;
+  color: #8a6100;
+}
+
+.badge-unsupported,
+.badge-uncited {
+  background: #fde8e6;
+  color: #b3261e;
+}
+
+.badge-unverified {
+  background: #eef1f6;
+  color: #53627a;
+}
+
+.meter {
+  margin-top: 12px;
+  height: 10px;
+  border-radius: 999px;
+  background: #e8edf4;
+  overflow: hidden;
+}
+
+.meter-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+
+.meter-verified {
+  background: #22a05c;
+}
+
+.meter-partial {
+  background: #e0a500;
+}
+
+.meter-unsupported,
+.meter-unverified {
+  background: #c6cdd9;
+}
+
+.claim-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+}
+
+.claim-item {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 8px 0;
+  border-top: 1px solid #e8edf4;
+  flex-wrap: wrap;
+}
+
+.claim-text {
+  flex: 1;
+  min-width: 200px;
+  line-height: 1.5;
+}
+
+.claim-cites {
+  white-space: nowrap;
 }
 
 .box-header {

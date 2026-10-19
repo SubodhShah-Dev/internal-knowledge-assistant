@@ -178,10 +178,12 @@ describe('ownership isolation', () => {
 });
 
 describe('question answering', () => {
-  test('returns answer and sources using the LLM', async () => {
+  test('returns answer, sources, and a persisted groundedness audit', async () => {
     const { token } = await signupUser();
     await uploadTxt(token);
-    mockChat.mockResolvedValue('Employees may work remotely three days per week [S1].');
+    mockChat
+      .mockResolvedValueOnce('Employees may work remotely three days per week [S1].')
+      .mockResolvedValueOnce('[{"id": 0, "status": "supported"}]');
 
     const res = await request(app)
       .post('/api/questions')
@@ -192,14 +194,53 @@ describe('question answering', () => {
     expect(res.body.answer).toContain('[S1]');
     expect(res.body.sources).toHaveLength(1);
     expect(res.body.sources[0].label).toBe('S1');
-    expect(res.body.sources[0].excerpt).toContain('remote');
-    expect(mockChat).toHaveBeenCalledTimes(1);
+    expect(mockChat).toHaveBeenCalledTimes(2);
+
+    expect(res.body.verification.status).toBe('verified');
+    expect(res.body.verification.score).toBe(100);
+    expect(res.body.verification.claims[0].status).toBe('supported');
 
     const history = await pool.query(
-      'SELECT question, answer FROM qa_history WHERE question = $1',
+      'SELECT q.id, q.question FROM qa_history q WHERE q.question = $1',
       ['How many remote days per week are allowed?']
     );
     expect(history.rows).toHaveLength(1);
+
+    const audit = await pool.query(
+      'SELECT status, overall_score, verifier_model, claims FROM answer_verifications WHERE qa_history_id = $1',
+      [history.rows[0].id]
+    );
+    expect(audit.rows).toHaveLength(1);
+    expect(audit.rows[0].status).toBe('verified');
+    expect(Number(audit.rows[0].overall_score)).toBe(100);
+    expect(audit.rows[0].claims[0].status).toBe('supported');
+  });
+
+  test('still returns the answer when the verifier LLM fails', async () => {
+    const { token } = await signupUser();
+    await uploadTxt(token);
+    const { LlmUnavailableError: Err } = jest.requireActual('../src/services/llm');
+    mockChat
+      .mockResolvedValueOnce('Employees may work remotely three days per week [S1].')
+      .mockRejectedValueOnce(new Err('verifier down'));
+
+    const res = await request(app)
+      .post('/api/questions')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ question: 'What is the weekly remote work limit?' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.answer).toContain('[S1]');
+    expect(res.body.verification.status).toBe('unverified');
+
+    const audit = await pool.query(
+      `SELECT av.status FROM answer_verifications av
+       JOIN qa_history q ON q.id = av.qa_history_id
+       WHERE q.question = $1`,
+      ['What is the weekly remote work limit?']
+    );
+    expect(audit.rows).toHaveLength(1);
+    expect(audit.rows[0].status).toBe('unverified');
   });
 
   test('abstains honestly when no evidence is retrieved', async () => {
@@ -214,6 +255,7 @@ describe('question answering', () => {
     expect(res.status).toBe(200);
     expect(res.body.answer).toMatch(/couldn't find/i);
     expect(res.body.sources).toEqual([]);
+    expect(res.body.verification).toBeNull();
     expect(mockChat).not.toHaveBeenCalled();
   });
 

@@ -76,7 +76,13 @@ export default function AssistantPage({ email, onLoggedOut }: Props) {
 
         {askError && <p className="error-text" role="alert">{askError}</p>}
 
-        {result && <AnswerCard answer={result.answer} sources={result.sources} />}
+        {result && (
+          <AnswerCard
+            answer={result.answer}
+            sources={result.sources}
+            verification={result.verification}
+          />
+        )}
       </div>
     </div>
   );

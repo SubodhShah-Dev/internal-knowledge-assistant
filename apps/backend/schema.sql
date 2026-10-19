@@ -39,3 +39,16 @@ CREATE TABLE IF NOT EXISTS qa_history (
   answer text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now()
 );
+
+-- Groundedness Audit: one row per verified answer, holding the per-claim
+-- entailment results and the overall groundedness score (0-100).
+CREATE TABLE IF NOT EXISTS answer_verifications (
+  id bigserial PRIMARY KEY,
+  qa_history_id bigint NOT NULL REFERENCES qa_history(id) ON DELETE CASCADE,
+  overall_score numeric(5,2) NOT NULL CHECK (overall_score >= 0 AND overall_score <= 100),
+  status text NOT NULL CHECK (status IN ('verified', 'partial', 'unsupported', 'unverified')),
+  verifier_model text NOT NULL,
+  claims jsonb NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS answer_verifications_qa_idx ON answer_verifications(qa_history_id);
