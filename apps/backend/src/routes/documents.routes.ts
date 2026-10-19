@@ -23,7 +23,14 @@ const upload = multer({
   }
 });
 
-const uploadDir = path.resolve(process.env.UPLOAD_DIR || './apps/backend/uploads');
+// Resolve uploads against the backend package root so the directory does not
+// depend on the process CWD (npm -w scripts run from apps/backend, but tsx may
+// run from the repo root). Absolute UPLOAD_DIR values are used as-is.
+const backendRoot = path.resolve(__dirname, '../..');
+const configuredUploadDir = process.env.UPLOAD_DIR || 'uploads';
+const uploadDir = path.isAbsolute(configuredUploadDir)
+  ? configuredUploadDir
+  : path.resolve(backendRoot, configuredUploadDir);
 
 documentsRouter.get('/', requireAuth, async (req, res, next) => {
   try {
