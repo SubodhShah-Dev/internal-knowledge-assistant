@@ -9,3 +9,5 @@ apps/backend/uploads/*
 !apps/backend/uploads/.gitkeep
 .DS_Store
 apps/backend/test-uploads/
+test-results/
+playwright-report/
