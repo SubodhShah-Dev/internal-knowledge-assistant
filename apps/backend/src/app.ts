@@ -6,6 +6,7 @@ import morgan from 'morgan';
 import { authRouter } from './routes/auth.routes';
 import { documentsRouter } from './routes/documents.routes';
 import { questionsRouter } from './routes/questions.routes';
+import { LlmUnavailableError } from './services/llm';
 
 export const app = express();
 
@@ -29,6 +30,9 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
   }
   if (err?.name === 'MulterError') {
     return res.status(400).json({ error: 'Invalid upload.' });
+  }
+  if (err instanceof LlmUnavailableError) {
+    return res.status(503).json({ error: 'The language model is unavailable right now. Please try again in a moment.' });
   }
   res.status(500).json({ error: err.message || 'Unexpected server error.' });
 });
