@@ -1,3 +1,17 @@
+export type ClaimStatus = 'supported' | 'partial' | 'unsupported' | 'uncited' | 'unverified';
+
+export type VerifiedClaim = {
+  text: string;
+  sourceLabels: string[];
+  status: ClaimStatus;
+};
+
+export type Verification = {
+  status: 'verified' | 'partial' | 'unsupported' | 'unverified';
+  score: number;
+  claims: VerifiedClaim[];
+};
+
 export type Source = {
   label: string;
   documentId: string;
@@ -9,6 +23,7 @@ export type Source = {
 export type AskResponse = {
   answer: string;
   sources: Source[];
+  verification: Verification | null;
 };
 
 export type DocumentMeta = {

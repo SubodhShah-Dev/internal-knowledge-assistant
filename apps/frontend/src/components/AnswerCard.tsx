@@ -1,12 +1,14 @@
 import SourceList from './SourceList';
-import type { Source } from '../types';
+import VerificationPanel from './VerificationPanel';
+import type { Source, Verification } from '../types';
 
 type Props = {
   answer: string;
   sources: Source[];
+  verification: Verification | null;
 };
 
-export default function AnswerCard({ answer, sources }: Props) {
+export default function AnswerCard({ answer, sources, verification }: Props) {
   if (!answer) return null;
   return (
     <>
@@ -14,6 +16,7 @@ export default function AnswerCard({ answer, sources }: Props) {
         <h3>Answer</h3>
         <p>{answer}</p>
       </div>
+      <VerificationPanel verification={verification} />
       <SourceList sources={sources} />
     </>
   );
