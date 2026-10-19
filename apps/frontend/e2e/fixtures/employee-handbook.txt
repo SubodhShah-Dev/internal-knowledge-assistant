@@ -1,0 +1,17 @@
+Acme Corp Employee Handbook
+
+Annual Leave Policy
+Employees receive 20 days of paid annual leave per year. Leave requests must be
+submitted at least two weeks in advance and approved by the employee's manager.
+
+Remote Work Policy
+Employees may work remotely up to three days per week with manager approval.
+Core collaboration hours are 10:00 to 16:00 in your local timezone.
+
+Equipment
+A one-time equipment stipend of 500 dollars is available to all full-time
+employees upon joining the company.
+
+Expense Reimbursement
+Business travel expenses must be filed within 30 days of returning. Meals are
+reimbursed up to 40 dollars per day.
