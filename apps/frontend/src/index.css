@@ -46,12 +46,78 @@ h1 {
 .upload-box,
 .question-box,
 .answer-box,
-.sources-box {
+.sources-box,
+.documents-box {
   margin-top: 20px;
   padding: 16px;
   border: 1px solid #ebf0f6;
   border-radius: 12px;
   background: #fafcff;
+}
+
+.box-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.box-header h1,
+.box-header h3 {
+  margin-bottom: 4px;
+}
+
+.user-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.muted {
+  color: #6b7a92;
+  font-weight: 400;
+  font-size: 0.9rem;
+}
+
+.error-text {
+  color: #b3261e;
+  font-weight: 600;
+  margin: 10px 0 0;
+}
+
+.success-text {
+  color: #1a7f4b;
+  font-weight: 600;
+  margin: 10px 0 0;
+}
+
+.document-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+}
+
+.document-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid #e8edf4;
+  flex-wrap: wrap;
+}
+
+.document-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+button.small {
+  padding: 6px 12px;
+  font-size: 0.85rem;
 }
 
 .row {
