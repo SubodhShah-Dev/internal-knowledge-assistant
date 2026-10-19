@@ -1,47 +1,40 @@
 # AI-Powered Internal Knowledge Assistant for Organizations
 
-A full-stack project that lets users upload PDFs or text files, ask natural-language questions, and receive grounded answers based on the uploaded document content. The app is built with React + TypeScript on the frontend and Node.js + Express + TypeScript on the backend, using PostgreSQL for persistence and Ollama for local LLM inference.
+Upload a PDF or plain-text file, ask a question in natural language, and get an answer grounded in your own documents—with supporting excerpts, honest "not in these documents" abstentions, and a **Groundedness Audit** that verifies every claim against its cited evidence.
 
-This project is designed as a practical internship-level MVP that demonstrates:
-- authentication and protected routes
-- file upload and validation
-- text extraction and chunking
-- PostgreSQL full-text retrieval
-- grounded LLM answers with references to source excerpts
-- secure per-user document ownership
+Built as a realistic one-week MVP: React + TypeScript + Vite, Node.js + Express + TypeScript, PostgreSQL, and any OpenAI-compatible LLM—local Ollama or a free-tier cloud provider (Groq/Gemini/OpenRouter). No paid AI service required.
 
-## Live idea
+What this project demonstrates end to end:
 
-Users can:
-- sign up and log in
-- upload a PDF or TXT file
-- ask questions like "What is the annual leave policy?"
-- get an answer based on the content of uploaded documents
-- view the supporting excerpts used by the model
-- download only their own files
+- authentication (signup/login) and JWT-protected routes
+- PDF/TXT upload with size/type validation and per-user ownership
+- text extraction, chunking, and persistent storage
+- PostgreSQL full-text retrieval (`websearch_to_tsquery` + `ts_rank`)
+- LLM answers grounded in retrieved excerpts via a provider-agnostic client
+- **Groundedness Audit**: claim-level citation validation, entailment verification, 0–100 score, persisted audit trail
+- document library UI with download and a real-browser E2E smoke test
+
+## Features
+
+- signup/login; JWT stored client-side; automatic logout on 401
+- upload PDF or TXT (10 MB limit); unsupported/oversized files rejected with clear errors
+- text extraction (pdf-parse v2), chunking (~900 chars, 120 overlap), original file stored under a generated name
+- ask questions; relevant chunks retrieved with PostgreSQL full-text search
+- answer generated from retrieved excerpts only, with `[S1]`-style citations
+- **Groundedness Audit**: each claim checked against its cited excerpts by a second LLM pass → SUPPORTED / PARTIAL / UNSUPPORTED / NO CITATION, plus an overall 0–100 score, persisted in `answer_verifications`
+- abstention when retrieval finds nothing ("I could not find the answer in the uploaded documents")—no sources, no audit, no LLM call
+- document library list, protected download of your own files only
+- LLM outage returns HTTP 503 with a clear message, never a 500
 
 ## Tech stack
 
-- Frontend: React, TypeScript, Vite
-- Backend: Node.js, Express, TypeScript
-- Database: PostgreSQL
-- AI Runtime: Ollama (local LLM)
-- File parsing: pdf-parse for PDFs
-- Auth: bcrypt + JWT
-- Testing: Jest + Supertest + Playwright (optional for E2E)
-
-## Core features
-
-- user signup and login
-- JWT-based protected routes
-- PDF and TXT upload with size and type validation
-- extraction of readable text from uploaded files
-- chunking of large documents into smaller searchable sections
-- PostgreSQL full-text retrieval for document matching
-- answer generation grounded in retrieved document excerpts
-- display of supporting excerpts and document labels
-- no-evidence handling when the uploaded documents do not contain the answer
-- per-user ownership checks for fetching or downloading documents
+- **Frontend:** React, TypeScript, Vite
+- **Backend:** Node.js, Express, TypeScript
+- **Database:** PostgreSQL (Docker), full-text search
+- **LLM:** OpenAI-compatible client — Groq free tier (default), Google Gemini, OpenRouter, or local Ollama via env config
+- **File parsing:** pdf-parse v2 (PDFs), plain-text read (TXT), multer v2 upload
+- **Auth:** bcrypt + JWT
+- **Testing:** Jest + Supertest (unit + integration) and Playwright (E2E smoke)
 
 ## Project structure
 
@@ -49,65 +42,72 @@ Users can:
 internal-knowledge-assistant/
 ├── apps/
 │   ├── frontend/
+│   │   ├── e2e/                    # Playwright smoke test + fixture
+│   │   ├── playwright.config.ts
 │   │   └── src/
-│   │       ├── api/
-│   │       ├── components/
-│   │       ├── pages/
+│   │       ├── api/client.ts       # typed fetch wrapper + auth token
+│   │       ├── components/         # UploadForm, DocumentList, QuestionForm,
+│   │       │                       # AnswerCard, SourceList, VerificationPanel
+│   │       ├── pages/              # LoginPage, AssistantPage
+│   │       ├── types.ts
 │   │       ├── App.tsx
 │   │       └── main.tsx
 │   └── backend/
 │       ├── src/
-│       │   ├── middleware/
-│       │   ├── routes/
-│       │   ├── services/
-│       │   ├── app.ts
-│       │   ├── db.ts
-│       │   ├── seed.ts
-│       │   └── server.ts
-│       ├── schema.sql
-│       ├── test/
+│       │   ├── middleware/         # auth (JWT)
+│       │   ├── routes/             # auth, documents, questions (+types)
+│       │   ├── services/           # llm (OpenAI-compatible), extractText,
+│       │   │                       # chunkText, verifyAnswer (Groundedness Audit)
+│       │   ├── app.ts              # express app, CORS, routes, error mapping
+│       │   ├── db.ts               # pg pool (root .env)
+│       │   ├── seed.ts             # demo user
+│       │   └── server.ts           # entrypoint
+│       ├── schema.sql              # users, documents, chunks,
+│       │                           # qa_history, answer_verifications
+│       ├── test/                   # jest config, global setup, fixtures,
+│       │                           # unit + integration tests
 │       └── .env.example
-├── docker-compose.yml
+├── docker-compose.yml              # postgres only
 ├── .env.example
-├── .gitignore
-├── README.md
-├── LICENSE
 └── package.json
 ```
 
 ## Architecture
 
 ```text
-React + TypeScript UI
+React + TypeScript UI (Vite, :5173)
         |
         | JWT / JSON API
         v
-Express + TypeScript API
+Express + TypeScript API (:4000)
         |
-        +--> PostgreSQL (users, documents, chunks)
+        +--> PostgreSQL (users, documents, chunks, qa_history,
+        |                 answer_verifications)
         |
-        +--> Local file storage for uploaded PDFs/TXT files
+        +--> Local file storage (original uploads, generated filenames)
         |
-        +--> Ollama local LLM
+        +--> OpenAI-compatible LLM (Groq / Gemini / OpenRouter / Ollama)
+                answer pass (grounded in retrieved excerpts)
+                verifier pass (Groundedness Audit, temperature 0)
 ```
 
-The project uses a simple retrieval-augmented generation pipeline:
-1. upload document
-2. extract text
-3. split into chunks
-4. store chunks in PostgreSQL
-5. search relevant chunks by keyword/full-text matching
-6. pass matching excerpts to a local LLM
-7. return answer and supporting sources
+The retrieval-augmented generation pipeline:
+
+1. upload document → extract text → reject empty/scanned-only files
+2. split into overlapping chunks → persist file, metadata, chunks
+3. on a question: full-text search over the owner's chunks → top excerpts labeled `[S1]`, `[S2]`, …
+4. answer with the LLM using only those excerpts (instructions treat excerpts as untrusted data)
+5. **audit**: parse claims → validate citation labels against actually-returned sources → LLM entailment check per claim → score 0–100 → persist in the same transaction as the answer
+6. return `{ answer, sources, verification }` to the UI
+
+If retrieval returns nothing, the API short-circuits with an honest abstention (no LLM call). If the verifier fails or times out, claims degrade to `unverified`—the answer is always delivered.
 
 ## Prerequisites
 
-Before running the project, install:
 - Node.js 20+
 - npm
-- Docker
-- Git
-- Ollama
+- Docker (for Postgres)
+- a free LLM API key **or** local Ollama (both optional until you ask a question)
 
 ## Install and run
 
@@ -118,53 +118,54 @@ git clone https://github.com/SubodhShah-Dev/internal-knowledge-assistant.git
 cd internal-knowledge-assistant
 ```
 
-### 2. Install root dependencies
+### 2. Install dependencies
 
 ```bash
 npm install
 ```
 
-### 3. Start PostgreSQL with Docker
+### 3. Start PostgreSQL
 
 ```bash
 docker compose up -d postgres
 ```
 
-### 4. Apply the database schema
-
-```bash
-psql "postgres://app_user:local_dev_password@localhost:5432/knowledge_assistant" -f apps/backend/schema.sql
-```
-
-If you do not have `psql` locally, use the container shell:
+### 4. Apply the schema
 
 ```bash
 docker compose exec -T postgres psql -U app_user -d knowledge_assistant < apps/backend/schema.sql
 ```
 
-### 5. Install and run Ollama
+(If you have local `psql`: `psql "postgres://app_user:local_dev_password@localhost:5432/knowledge_assistant" -f apps/backend/schema.sql`)
 
-```bash
-ollama pull qwen3:1.7b
-ollama run qwen3:1.7b
-```
+### 5. Configure the environment
 
-Keep Ollama running in the background while developing.
-
-### 6. Set environment variables
-
-Create a `.env` file in the project root or within the backend depending on your chosen setup. Example:
+Copy `.env.example` to `.env` in the repo root and fill in:
 
 ```env
 PORT=4000
 DATABASE_URL=postgres://app_user:local_dev_password@localhost:5432/knowledge_assistant
-JWT_SECRET=replace_with_a_strong_secret
+JWT_SECRET=replace_with_a_strong_secret      # openssl rand -hex 32
 FRONTEND_ORIGIN=http://localhost:5173
-UPLOAD_DIR=./apps/backend/uploads
-OLLAMA_HOST=http://127.0.0.1:11434
-OLLAMA_MODEL=qwen3:1.7b
+UPLOAD_DIR=uploads                            # resolved against apps/backend
 MAX_UPLOAD_MB=10
+
+# LLM: pick a provider — same protocol for all of them
+LLM_BASE_URL=https://api.groq.com/openai/v1   # or http://127.0.0.1:11434/v1 (Ollama)
+LLM_API_KEY=...                               # free key from console.groq.com/keys (omit for Ollama)
+LLM_MODEL=openai/gpt-oss-120b                 # or qwen3:1.7b on Ollama
+LLM_TIMEOUT_MS=60000
 ```
+
+Free-tier options (no credit card): **Groq** (fastest), **Google AI Studio/Gemini** (largest quota), **OpenRouter** (`:free` models). For fully offline use, run Ollama and point `LLM_BASE_URL` at it.
+
+### 6. (Optional) seed a demo user
+
+```bash
+npm run seed -w apps/backend
+```
+
+Creates `demo@example.com` / `DemoPassword123!`.
 
 ### 7. Run the app
 
@@ -172,81 +173,70 @@ MAX_UPLOAD_MB=10
 npm run dev
 ```
 
-Then open:
 - frontend: http://localhost:5173
-- backend health check: http://localhost:4000/api/health
+- backend health: http://localhost:4000/api/health
 
-## Sample user
+Sign up (or use the seeded demo user), upload a PDF or TXT, and ask a question.
 
-A demo user can be created with the seed script or by using the signup route.
+## Testing
 
-Example seed data:
-- email: demo@example.com
-- password: DemoPassword123!
+```bash
+# unit + integration (50 tests): auth, upload validation, ownership isolation,
+# retrieval, grounded answer with mocked LLM, abstention, 503 on LLM outage,
+# claim parsing, all Groundedness Audit paths, ledger persistence
+npm test
 
-## Project roadmap
+# typecheck both workspaces
+npm run typecheck
 
-### Phase 1: MVP (1 week)
-- user signup/login
-- PDF/TXT upload
-- text extraction and chunking
-- persistent storage in PostgreSQL
-- full-text document retrieval
-- grounded answer generation using a local LLM
-- source excerpts shown to the user
-- per-user ownership enforcement
-- basic frontend UI
+# E2E smoke (real browser, real stack, real LLM): signup → upload handbook →
+# ask → answer + sources + audit panel → download → hard abstention → logout
+# requires Docker Postgres + a populated .env; reuses running dev servers
+npm run test:e2e
+```
 
-### Phase 2: improvements
-- embeddings and vector search
-- hybrid keyword + semantic retrieval
-- better citations and page references
-- stronger access control and workspaces
-- DOCX support and OCR for scanned PDFs
-- CI/CD and E2E tests
+The E2E fixture is a synthetic employee handbook (`apps/frontend/e2e/fixtures/employee-handbook.txt`)—no real company data.
 
-### Phase 3: production hardening
-- monitoring and logs
-- secure deployment
-- backups and retention policy
-- deployment review
-- performance optimization
+## Groundedness Audit
+
+Generic chat-with-PDF agents return an answer and ask you to trust the excerpts. This assistant **audits** the answer against them:
+
+1. the answer is decomposed into sentence-level claims with their `[S#]` citation labels
+2. citations are validated structurally (no label → `uncited`; label not among returned sources → `unsupported`)—no LLM needed for either
+3. remaining claims go through a second LLM pass (temperature 0) that rules each `supported`, `partial`, or `unsupported` against its cited excerpts
+4. overall score = `100 × (supported + 0.5×partial) / total`; status `verified | partial | unsupported | unverified`
+5. the audit is persisted in `answer_verifications` alongside the answer
+
+The UI shows a meter, an overall badge, and per-claim verdicts. Verifier failure never blocks an answer—it degrades to `unverified`. See the roadmap doc (§ Groundedness Audit) for the full design rationale.
 
 ## Security notes
 
-This project is an MVP and is not intended for confidential production data without additional hardening.
+This is an MVP, not production software. Do not upload confidential documents without further hardening. Before real use: secret management, HTTPS and strict CORS, HttpOnly cookies instead of localStorage JWTs, malware scanning for uploads, rate limiting, backups, and a retention/deletion policy.
 
-Key concerns to address before real use:
-- secure secret management
-- HTTPS and strong CORS settings
-- secure cookie strategy if switching from JWT in localStorage
-- malware scanning for uploaded documents
-- rate limiting and abuse prevention
-- data backup and restore process
-- retention and deletion policy
+Notable MVP trade-offs already in place: uploads stored on local disk with generated filenames (never user-controlled paths), ownership checks on every document access, excerpts rendered as text (never `dangerouslySetInnerHTML`), and prompt instructions that treat document content as untrusted data.
+
+## Roadmap
+
+**Phase 1 — done:** auth, upload+extraction+chunking, full-text retrieval, grounded answers, Groundedness Audit with persistence, document library UI, unit/integration/E2E tests.
+
+**Phase 2 — next:**
+- embeddings + `pgvector` for semantic/hybrid retrieval
+- page-level citations
+- admin view over the audit ledger ("worst-grounded answers this week")
+- batch-per-sentence verification; re-prompt answers missing citations
+- DOCX and OCR support
+- CI/CD
+
+**Phase 3 — production hardening:** monitoring, secure deployment, backups/retention, performance.
 
 ## License
 
-This project is licensed under the MIT License.
-
-## Future ideas
-
-Possible enhancements after the MVP:
-- semantic search using `pgvector`
-- multi-user sharing and document permissions
-- chat history and resumeable conversations
-- organization-level knowledge base indexing
-- document versioning
-- file import from Google Drive, Notion, or Git repositories
+MIT — see [LICENSE](LICENSE).
 
 ## Demo workflow
 
 1. sign up / log in
 2. upload a PDF or TXT file
-3. ask a question about the uploaded content
-4. review answer and evidence excerpts
-5. confirm the answer is grounded in the uploaded documents
-
-## Notes
-
-This project is intentionally scoped to be realistic but achievable in a short time. The goal is not to build a huge enterprise system in one week, but to build a working, explainable, and credible document Q&A application with real backend logic and a cloud/local LLM.
+3. ask a question about its content
+4. read the answer, its `[S#]`-labeled excerpts, and the Groundedness Audit
+5. ask a question the documents cannot answer and see the honest abstention
