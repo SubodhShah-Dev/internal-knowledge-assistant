@@ -1174,7 +1174,7 @@ input[type='file']::file-selector-button {
 }
 
 /* ============================================================
-   Auth (login/signup)
+   Auth (login/signup) — centered split panel
    ============================================================ */
 
 .auth-shell {
@@ -1187,31 +1187,164 @@ input[type='file']::file-selector-button {
     var(--bg);
 }
 
-.auth-card {
-  width: min(400px, 100%);
+.auth-split {
+  width: min(880px, 100%);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-height: 480px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow);
-  padding: var(--space-6) var(--space-5) var(--space-5);
+  overflow: hidden;
+}
+
+.auth-form {
+  padding: var(--space-6) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.auth-info {
+  padding: var(--space-6) var(--space-5);
+  background: var(--surface-2);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-3);
+}
+
+/* Inner-edge divider follows the columns. */
+.auth-split[data-mode='login'] .auth-form {
+  border-inline-end: 1px solid var(--border);
+}
+.auth-split[data-mode='signup'] .auth-info {
+  border-inline-end: 1px solid var(--border);
+}
+
+/* Signup flips the columns: info left, form right. */
+.auth-split[data-mode='signup'] .auth-form {
+  order: 2;
+}
+.auth-split[data-mode='signup'] .auth-info {
+  order: 1;
+}
+
+/* Slide + fade swap: animation-name differs per mode, so the switch re-triggers it. */
+.auth-split[data-mode='login'] .auth-form {
+  animation: auth-enter-right 0.26s ease-out;
+}
+.auth-split[data-mode='login'] .auth-info {
+  animation: auth-enter-left 0.26s ease-out;
+}
+.auth-split[data-mode='signup'] .auth-form {
+  animation: auth-enter-left 0.26s ease-out;
+}
+.auth-split[data-mode='signup'] .auth-info {
+  animation: auth-enter-right 0.26s ease-out;
+}
+
+@keyframes auth-enter-right {
+  from {
+    transform: translateX(28px);
+    opacity: 0.4;
+  }
+}
+
+@keyframes auth-enter-left {
+  from {
+    transform: translateX(-28px);
+    opacity: 0.4;
+  }
+}
+
+/* Mobile-only brand row (info panel carries the brand on desktop). */
+.form-brand {
+  display: none;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--text);
 }
 
 .auth-brand {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  margin-bottom: var(--space-5);
 }
 
-.auth-card h1 {
-  margin: 0;
-  font-size: 19px;
+.auth-brand-name {
+  font-size: 14px;
   font-weight: 650;
-  letter-spacing: -0.01em;
 }
 
-.auth-card .subtitle {
-  margin: 6px 0 var(--space-5);
+.auth-info h1 {
+  margin: 0;
+  font-size: clamp(26px, 3vw, 32px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.auth-lede {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-muted);
+  max-width: 36ch;
+}
+
+.demo-creds {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.demo-label {
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.demo-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: 13px;
+}
+
+.demo-row span {
+  color: var(--text-muted);
+}
+
+.demo-row code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  color: var(--text);
+}
+
+.demo-fill {
+  align-self: flex-start;
+  margin-top: 2px;
+  color: var(--accent);
+  font-size: 13px;
+}
+
+.signup-notes {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   font-size: 13.5px;
   color: var(--text-muted);
 }
@@ -1231,8 +1364,9 @@ input[type='file']::file-selector-button {
 }
 
 .auth-error {
-  margin: var(--space-3) 0 0;
+  margin: 0;
   font-size: 13.5px;
+  font-weight: 550;
   color: var(--danger);
 }
 
@@ -1257,6 +1391,43 @@ input[type='file']::file-selector-button {
 
 .auth-switch:hover {
   color: var(--accent);
+}
+
+/* Stack: form first (errors in the info panel land right under the button). */
+@media (max-width: 720px) {
+  .auth-split {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+
+  .auth-split[data-mode] .auth-form {
+    order: 1;
+    border-inline-end: none;
+    animation: none;
+  }
+
+  .auth-split[data-mode] .auth-info {
+    order: 2;
+    border-inline-end: none;
+    border-block-start: 1px solid var(--border);
+    animation: none;
+  }
+
+  .form-brand {
+    display: flex;
+  }
+
+  /* The form row already brands the card; don't repeat it in the info panel. */
+  .auth-info .auth-brand {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-split[data-mode] .auth-form,
+  .auth-split[data-mode] .auth-info {
+    animation: none;
+  }
 }
 
 /* ============================================================
