@@ -1,9 +1,28 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#111418" />
+    <meta name="description" content="Ask questions about your documents and get grounded, verified answers." />
     <title>Internal Knowledge Assistant</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%234da3ff'/><path d='M9 10h14M9 16h14M9 22h9' stroke='%230b0e12' stroke-width='3' stroke-linecap='round'/></svg>"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      // Apply the stored theme before first paint to avoid a flash.
+      try {
+        var t = localStorage.getItem('theme');
+        document.documentElement.dataset.theme = t === 'light' ? 'light' : 'dark';
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

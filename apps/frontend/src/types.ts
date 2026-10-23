@@ -24,7 +24,46 @@ export type AskResponse = {
   answer: string;
   sources: Source[];
   verification: Verification | null;
+  conversationId?: number;
+  messageId?: number;
 };
+
+export type ConversationSummary = {
+  id: number;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number | string;
+};
+
+export type ConversationTurn = {
+  id: number;
+  question: string;
+  answer: string;
+  sources: Source[];
+  verification: Verification | null;
+  createdAt: string;
+};
+
+export type ConversationDetail = {
+  id: number;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  turns: ConversationTurn[];
+};
+
+/** Client-side thread message model (streaming-aware). */
+export type ThreadMessage =
+  | { role: 'user'; text: string }
+  | {
+      role: 'assistant';
+      text: string;
+      sources: Source[] | null;
+      verification: Verification | null;
+      streaming: boolean;
+      error?: string;
+    };
 
 export type DocumentMeta = {
   id: string;
