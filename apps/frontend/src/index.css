@@ -1188,7 +1188,7 @@ input[type='file']::file-selector-button {
 }
 
 .auth-split {
-  width: min(880px, 100%);
+  width: min(720px, 100%);
   display: grid;
   grid-template-columns: 1fr 1fr;
   min-height: 480px;
