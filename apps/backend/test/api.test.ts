@@ -1,6 +1,6 @@
 jest.mock('../src/services/llm', () => {
   const actual = jest.requireActual('../src/services/llm');
-  return { ...actual, chat: jest.fn() };
+  return { ...actual, chat: jest.fn(), chatStream: jest.fn() };
 });
 
 import fs from 'node:fs';
@@ -8,9 +8,10 @@ import path from 'node:path';
 import request from 'supertest';
 import { app } from '../src/app';
 import { pool } from '../src/db';
-import { chat, LlmUnavailableError } from '../src/services/llm';
+import { chat, chatStream, LlmUnavailableError } from '../src/services/llm';
 
 const mockChat = chat as jest.MockedFunction<typeof chat>;
+const mockChatStream = chatStream as jest.MockedFunction<typeof chatStream>;
 
 const SAMPLE_TXT =
   'Acme Remote Work Policy. Employees may work remotely up to three days per week with manager approval. ' +
@@ -44,6 +45,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   mockChat.mockReset();
+  mockChatStream.mockReset();
 });
 
 describe('health', () => {
@@ -302,5 +304,273 @@ describe('question answering', () => {
     expect(res.status).toBe(200);
     expect(res.body.sources).toEqual([]);
     expect(mockChat).not.toHaveBeenCalled();
+  });
+});
+
+async function* fakeTokenStream() {
+  yield 'Employees may work remotely ';
+  yield 'three days per week [S1].';
+}
+
+describe('chat sessions', () => {
+  test('ask creates a conversation, listed newest-first with a derived title', async () => {
+    const { token } = await signupUser();
+    await uploadTxt(token);
+    mockChat
+      .mockResolvedValueOnce('Employees may work remotely three days per week [S1].')
+      .mockResolvedValueOnce('[{"id": 0, "status": "supported"}]');
+
+    const res = await request(app)
+      .post('/api/questions')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ question: 'How many remote days per week are allowed?' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.conversationId).toBeTruthy();
+    expect(res.body.messageId).toBeTruthy();
+
+    const list = await request(app)
+      .get('/api/conversations')
+      .set('Authorization', `Bearer ${token}`);
+    expect(list.status).toBe(200);
+    expect(list.body).toHaveLength(1);
+    expect(list.body[0].id).toBe(res.body.conversationId);
+    expect(list.body[0].title).toContain('How many remote days');
+    expect(Number(list.body[0].message_count)).toBe(1);
+  });
+
+  test('conversation detail returns turns with stored sources and verification', async () => {
+    const { token } = await signupUser();
+    await uploadTxt(token);
+    mockChat
+      .mockResolvedValueOnce('Employees may work remotely three days per week [S1].')
+      .mockResolvedValueOnce('[{"id": 0, "status": "supported"}]');
+
+    const asked = await request(app)
+      .post('/api/questions')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ question: 'How many remote days per week are allowed?' });
+
+    const detail = await request(app)
+      .get(`/api/conversations/${asked.body.conversationId}`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(detail.status).toBe(200);
+    expect(detail.body.turns).toHaveLength(1);
+    const turn = detail.body.turns[0];
+    expect(turn.question).toContain('remote days');
+    expect(turn.answer).toContain('[S1]');
+    expect(turn.sources).toHaveLength(1);
+    expect(turn.sources[0].label).toBe('S1');
+    expect(turn.verification.status).toBe('verified');
+    expect(turn.verification.score).toBe(100);
+  });
+
+  test('follow-up questions include prior turns in the LLM prompt', async () => {
+    const { token } = await signupUser();
+    await uploadTxt(token);
+    mockChat
+      .mockResolvedValueOnce('Employees may work remotely three days per week [S1].')
+      .mockResolvedValueOnce('[{"id": 0, "status": "supported"}]');
+
+    const first = await request(app)
+      .post('/api/questions')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ question: 'How many remote days per week are allowed?' });
+    expect(first.status).toBe(200);
+
+    mockChat
+      .mockResolvedValueOnce('Three days per week with manager approval [S1].')
+      .mockResolvedValueOnce('[{"id": 0, "status": "supported"}]');
+
+    const second = await request(app)
+      .post('/api/questions')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ question: 'And with whose approval?', conversationId: first.body.conversationId });
+
+    expect(second.status).toBe(200);
+    expect(second.body.conversationId).toBe(first.body.conversationId);
+
+    // call index 2 = answer pass of the follow-up (0,1 were first ask's answer+verifier)
+    const followUpMessages = mockChat.mock.calls[2][0];
+    const contents = followUpMessages.map(m => m.content).join('\n');
+    expect(contents).toContain('How many remote days per week are allowed?');
+    expect(contents).toContain('Employees may work remotely three days per week [S1].');
+    expect(contents).toContain("And with whose approval?");
+
+    const detail = await request(app)
+      .get(`/api/conversations/${first.body.conversationId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(detail.body.turns).toHaveLength(2);
+  });
+
+  test('rename and delete are owner-scoped; delete cascades turns', async () => {
+    const a = await signupUser();
+    const b = await signupUser();
+    await uploadTxt(a.token);
+    mockChat
+      .mockResolvedValueOnce('Employees may work remotely three days per week [S1].')
+      .mockResolvedValueOnce('[{"id": 0, "status": "supported"}]');
+
+    const asked = await request(app)
+      .post('/api/questions')
+      .set('Authorization', `Bearer ${a.token}`)
+      .send({ question: 'How many remote days per week are allowed?' });
+    const convId = asked.body.conversationId;
+
+    const renameB = await request(app)
+      .patch(`/api/conversations/${convId}`)
+      .set('Authorization', `Bearer ${b.token}`)
+      .send({ title: 'Stolen title' });
+    expect(renameB.status).toBe(404);
+
+    const renameA = await request(app)
+      .patch(`/api/conversations/${convId}`)
+      .set('Authorization', `Bearer ${a.token}`)
+      .send({ title: 'Remote work limits' });
+    expect(renameA.status).toBe(200);
+    expect(renameA.body.title).toBe('Remote work limits');
+
+    const getB = await request(app)
+      .get(`/api/conversations/${convId}`)
+      .set('Authorization', `Bearer ${b.token}`);
+    expect(getB.status).toBe(404);
+
+    const deleteB = await request(app)
+      .delete(`/api/conversations/${convId}`)
+      .set('Authorization', `Bearer ${b.token}`);
+    expect(deleteB.status).toBe(404);
+
+    const deleteA = await request(app)
+      .delete(`/api/conversations/${convId}`)
+      .set('Authorization', `Bearer ${a.token}`);
+    expect(deleteA.status).toBe(200);
+
+    const after = await request(app)
+      .get(`/api/conversations/${convId}`)
+      .set('Authorization', `Bearer ${a.token}`);
+    expect(after.status).toBe(404);
+
+    const turns = await pool.query('SELECT id FROM qa_history WHERE conversation_id = $1', [convId]);
+    expect(turns.rows).toHaveLength(0);
+  });
+
+  test('rejects invalid or foreign conversationId', async () => {
+    const a = await signupUser();
+    const b = await signupUser();
+    await uploadTxt(a.token);
+    mockChat
+      .mockResolvedValueOnce('Employees may work remotely three days per week [S1].')
+      .mockResolvedValueOnce('[{"id": 0, "status": "supported"}]');
+    const asked = await request(app)
+      .post('/api/questions')
+      .set('Authorization', `Bearer ${a.token}`)
+      .send({ question: 'How many remote days per week are allowed?' });
+
+    const invalid = await request(app)
+      .post('/api/questions')
+      .set('Authorization', `Bearer ${a.token}`)
+      .send({ question: 'Anything at all?', conversationId: 'abc' });
+    expect(invalid.status).toBe(400);
+
+    const foreign = await request(app)
+      .post('/api/questions')
+      .set('Authorization', `Bearer ${b.token}`)
+      .send({ question: 'Anything at all?', conversationId: asked.body.conversationId });
+    expect(foreign.status).toBe(404);
+  });
+
+  test('rename rejects empty or oversized titles', async () => {
+    const { token } = await signupUser();
+    mockChat.mockReset();
+    const created = await request(app)
+      .post('/api/questions')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ question: 'xylophone quantum zebra expedition' }); // abstention, no LLM
+    const convId = created.body.conversationId;
+
+    const empty = await request(app)
+      .patch(`/api/conversations/${convId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: '   ' });
+    expect(empty.status).toBe(400);
+
+    const huge = await request(app)
+      .patch(`/api/conversations/${convId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'x'.repeat(121) });
+    expect(huge.status).toBe(400);
+  });
+});
+
+describe('streaming (SSE)', () => {
+  test('streams sources, tokens, verification, then done and persists the turn', async () => {
+    const { token } = await signupUser();
+    await uploadTxt(token);
+    mockChatStream.mockImplementation(() => fakeTokenStream());
+    mockChat.mockResolvedValue('[{"id": 0, "status": "supported"}]');
+
+    const res = await request(app)
+      .post('/api/questions')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Accept', 'text/event-stream')
+      .send({ question: 'How many remote days per week are allowed?' });
+
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toContain('text/event-stream');
+    const body = res.text as string;
+    expect(body).toContain('event: sources');
+    expect(body).toContain('event: token');
+    expect(body).toContain('three days per week [S1].');
+    expect(body).toContain('event: verification');
+    expect(body).toContain('event: done');
+
+    const doneLine = body.split('\n').find(line => line.startsWith('data:') && line.includes('conversationId'));
+    expect(doneLine).toBeTruthy();
+
+    const detail = await request(app)
+      .get(`/api/conversations/${JSON.parse((doneLine as string).slice(5)).conversationId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(detail.body.turns).toHaveLength(1);
+    expect(detail.body.turns[0].answer).toContain('[S1]');
+    expect(detail.body.turns[0].verification.status).toBe('verified');
+  });
+
+  test('SSE abstention streams the canned answer without calling the LLM', async () => {
+    const { token } = await signupUser();
+    await uploadTxt(token);
+
+    const res = await request(app)
+      .post('/api/questions')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Accept', 'text/event-stream')
+      .send({ question: 'xylophone quantum zebra bicycle expedition' });
+
+    expect(res.status).toBe(200);
+    const body = res.text as string;
+    expect(body).toContain('event: sources');
+    expect(body).toContain("couldn't find");
+    expect(body).toContain('event: done');
+    expect(mockChatStream).not.toHaveBeenCalled();
+    expect(mockChat).not.toHaveBeenCalled();
+  });
+
+  test('SSE provider outage emits an error event', async () => {
+    const { token } = await signupUser();
+    await uploadTxt(token);
+    mockChatStream.mockImplementation(async function* () {
+      throw new LlmUnavailableError('provider offline');
+      yield ''; // unreachable; keeps the generator typed
+    });
+
+    const res = await request(app)
+      .post('/api/questions')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Accept', 'text/event-stream')
+      .send({ question: 'How many remote days per week are allowed?' });
+
+    expect(res.status).toBe(200);
+    expect(res.text as string).toContain('event: error');
+    expect(res.text as string).toContain('language model is unavailable');
   });
 });

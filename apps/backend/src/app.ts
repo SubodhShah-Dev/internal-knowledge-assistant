@@ -5,6 +5,7 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import { authRouter } from './routes/auth.routes';
 import { documentsRouter } from './routes/documents.routes';
+import { conversationsRouter } from './routes/conversations.routes';
 import { questionsRouter } from './routes/questions.routes';
 import { LlmUnavailableError } from './services/llm';
 
@@ -21,6 +22,7 @@ app.get('/api/health', (_req, res) => {
 
 app.use('/api/auth', authRouter);
 app.use('/api/documents', documentsRouter);
+app.use('/api/conversations', conversationsRouter);
 app.use('/api/questions', questionsRouter);
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

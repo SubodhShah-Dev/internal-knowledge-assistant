@@ -32,13 +32,31 @@ CREATE TABLE IF NOT EXISTS document_chunks (
 CREATE INDEX IF NOT EXISTS document_chunks_search_gin ON document_chunks USING GIN(search_vector);
 CREATE INDEX IF NOT EXISTS documents_owner_idx ON documents(owner_id);
 
+CREATE TABLE IF NOT EXISTS conversations (
+  id bigserial PRIMARY KEY,
+  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS conversations_user_updated_idx
+  ON conversations (user_id, updated_at DESC);
+
 CREATE TABLE IF NOT EXISTS qa_history (
   id bigserial PRIMARY KEY,
   user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  conversation_id bigint REFERENCES conversations(id) ON DELETE CASCADE,
   question text NOT NULL,
   answer text NOT NULL,
+  sources jsonb NOT NULL DEFAULT '[]',
   created_at timestamptz NOT NULL DEFAULT now()
 );
+
+-- Upgrades for databases created before chat sessions existed.
+ALTER TABLE qa_history ADD COLUMN IF NOT EXISTS conversation_id bigint REFERENCES conversations(id) ON DELETE CASCADE;
+ALTER TABLE qa_history ADD COLUMN IF NOT EXISTS sources jsonb NOT NULL DEFAULT '[]';
+
+CREATE INDEX IF NOT EXISTS qa_history_conv_idx ON qa_history (conversation_id, id);
 
 -- Groundedness Audit: one row per verified answer, holding the per-claim
 -- entailment results and the overall groundedness score (0-100).
