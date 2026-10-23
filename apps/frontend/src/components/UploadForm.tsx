@@ -23,7 +23,9 @@ export default function UploadForm({ onUploaded, onUnauthorized }: Props) {
     setMessage('');
     try {
       const result = await uploadDocument(file);
-      setMessage(`Upload complete: ${result.document.title} (${result.chunkCount} chunk${result.chunkCount === 1 ? '' : 's'} indexed).`);
+      setMessage(
+        `Upload complete: ${result.document.title} (${result.chunkCount} chunk${result.chunkCount === 1 ? '' : 's'} indexed).`
+      );
       setFile(null);
       if (inputRef.current) inputRef.current.value = '';
       onUploaded();
@@ -37,8 +39,10 @@ export default function UploadForm({ onUploaded, onUnauthorized }: Props) {
 
   return (
     <div className="upload-box">
-      <div className="row">
-        <label htmlFor="doc-file">Document (PDF or TXT, max 10 MB)</label>
+      <div className="upload-row">
+        <label className="file-label" htmlFor="doc-file">
+          Document (PDF or TXT, max 10 MB)
+        </label>
         <input
           id="doc-file"
           ref={inputRef}
@@ -51,13 +55,21 @@ export default function UploadForm({ onUploaded, onUnauthorized }: Props) {
           }}
         />
       </div>
-      <div className="actions">
-        <button onClick={handleUpload} disabled={busy || !file}>
+      <div className="upload-row">
+        <button className="btn btn-primary" onClick={handleUpload} disabled={busy || !file}>
           {busy ? 'Uploading…' : 'Upload'}
         </button>
+        {message && (
+          <p className="success-text" role="status">
+            {message}
+          </p>
+        )}
+        {error && (
+          <p className="error-text" role="alert">
+            {error}
+          </p>
+        )}
       </div>
-      {message && <p className="success-text" role="status">{message}</p>}
-      {error && <p className="error-text" role="alert">{error}</p>}
     </div>
   );
 }

@@ -1,4 +1,12 @@
-import type { AskResponse, AuthResponse, DocumentMeta } from '../types';
+import type {
+  AskResponse,
+  AuthResponse,
+  ConversationDetail,
+  ConversationSummary,
+  DocumentMeta,
+  Source,
+  Verification
+} from '../types';
 
 // Relative by default: Vite's dev server proxies /api to the backend, and a
 // same-origin production deploy needs no CORS. Override with VITE_API_URL.
@@ -75,11 +83,153 @@ export async function listDocuments(): Promise<DocumentMeta[]> {
   return apiFetch<DocumentMeta[]>('/documents');
 }
 
-export async function askQuestion(question: string): Promise<AskResponse> {
+export async function askQuestion(question: string, conversationId?: number): Promise<AskResponse> {
   return apiFetch<AskResponse>('/questions', {
     method: 'POST',
-    body: JSON.stringify({ question })
+    body: JSON.stringify(conversationId ? { question, conversationId } : { question })
   });
+}
+
+// Postgres bigint columns serialize as JSON strings; normalize ids/counts.
+export async function listConversations(): Promise<ConversationSummary[]> {
+  const rows = await apiFetch<ConversationSummary[]>('/conversations');
+  return rows.map(row => ({ ...row, id: Number(row.id), message_count: Number(row.message_count) }));
+}
+
+export async function getConversation(id: number): Promise<ConversationDetail> {
+  const detail = await apiFetch<ConversationDetail>(`/conversations/${id}`);
+  return {
+    ...detail,
+    id: Number(detail.id),
+    turns: detail.turns.map(turn => ({ ...turn, id: Number(turn.id) }))
+  };
+}
+
+export async function renameConversation(id: number, title: string): Promise<ConversationSummary> {
+  const row = await apiFetch<ConversationSummary>(`/conversations/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ title })
+  });
+  return { ...row, id: Number(row.id), message_count: Number(row.message_count) };
+}
+
+export async function deleteConversation(id: number): Promise<void> {
+  await apiFetch<{ ok: boolean }>(`/conversations/${id}`, { method: 'DELETE' });
+}
+
+export type StreamHandlers = {
+  onSources?: (sources: Source[]) => void;
+  onToken?: (text: string) => void;
+  onVerification?: (verification: Verification) => void;
+  onDone?: (payload: { conversationId: number; messageId: number; answer: string }) => void;
+  onError?: (message: string) => void;
+  signal?: AbortSignal;
+};
+
+/**
+ * Ask a question and consume the SSE answer stream.
+ * Resolves when the server ends the stream; rejects with ApiError on
+ * HTTP-level failures (400/401/503 before the stream starts).
+ */
+export async function askQuestionStream(
+  question: string,
+  conversationId: number | undefined,
+  handlers: StreamHandlers
+): Promise<void> {
+  const headers = new Headers({ 'Content-Type': 'application/json', Accept: 'text/event-stream' });
+  const token = getToken();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+
+  let response: Response;
+  try {
+    response = await fetch(`${API}/questions`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(conversationId ? { question, conversationId } : { question }),
+      signal: handlers.signal ?? null
+    });
+  } catch (error: any) {
+    if (error?.name === 'AbortError') throw error;
+    throw new ApiError(0, 'Could not reach the server. Is the API running?');
+  }
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    throw new ApiError(response.status, data?.error ?? `Request failed (${response.status}).`);
+  }
+
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('text/event-stream') || !response.body) {
+    // Server fell back to JSON (shouldn't happen with our Accept header).
+    const data = (await response.json().catch(() => null)) as AskResponse | null;
+    if (!data) throw new ApiError(0, 'Empty response from server.');
+    handlers.onSources?.(data.sources);
+    handlers.onToken?.(data.answer);
+    if (data.verification) handlers.onVerification?.(data.verification);
+    handlers.onDone?.({
+      conversationId: Number(data.conversationId ?? 0),
+      messageId: Number(data.messageId ?? 0),
+      answer: data.answer
+    });
+    return;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  const dispatch = (frame: string) => {
+    let event = 'message';
+    let data = '';
+    for (const line of frame.split(/\r?\n/)) {
+      if (line.startsWith('event:')) event = line.slice(6).trim();
+      else if (line.startsWith('data:')) data += line.slice(5).trim();
+    }
+    if (!data) return;
+    let parsed: any;
+    try {
+      parsed = JSON.parse(data);
+    } catch {
+      return;
+    }
+    switch (event) {
+      case 'sources':
+        handlers.onSources?.(parsed.sources as Source[]);
+        break;
+      case 'token':
+        handlers.onToken?.(String(parsed.text ?? ''));
+        break;
+      case 'verification':
+        handlers.onVerification?.(parsed.verification as Verification);
+        break;
+      case 'done':
+        handlers.onDone?.({
+          conversationId: Number(parsed.conversationId),
+          messageId: Number(parsed.messageId),
+          answer: String(parsed.answer ?? '')
+        });
+        break;
+      case 'error':
+        handlers.onError?.(String(parsed.message ?? 'Stream failed.'));
+        break;
+    }
+  };
+
+  for (;;) {
+    let chunk: ReadableStreamReadResult<Uint8Array>;
+    try {
+      chunk = await reader.read();
+    } catch (error: any) {
+      if (error?.name === 'AbortError') throw error;
+      throw new ApiError(0, 'The answer stream was interrupted.');
+    }
+    if (chunk.done) break;
+    buffer += decoder.decode(chunk.value, { stream: true });
+    const frames = buffer.split(/\n\n/);
+    buffer = frames.pop() ?? '';
+    for (const frame of frames) dispatch(frame);
+  }
+  if (buffer.trim()) dispatch(buffer);
 }
 
 export async function downloadDocument(doc: DocumentMeta): Promise<void> {

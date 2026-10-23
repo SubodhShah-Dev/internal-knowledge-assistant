@@ -1,6 +1,6 @@
 # AI-Powered Internal Knowledge Assistant for Organizations
 
-Upload a PDF or plain-text file, ask a question in natural language, and get an answer grounded in your own documents—with supporting excerpts, honest "not in these documents" abstentions, and a **Groundedness Audit** that verifies every claim against its cited evidence.
+Upload a PDF or plain-text file, then chat: ask questions in natural language and watch answers stream in token by token—grounded in your own documents, with supporting excerpts, honest "not in these documents" abstentions, and a **Groundedness Audit** that verifies every claim against its cited evidence. Conversations are saved as sessions you can revisit, rename, and delete from a ChatGPT-style sidebar.
 
 Built as a realistic one-week MVP: React + TypeScript + Vite, Node.js + Express + TypeScript, PostgreSQL, and any OpenAI-compatible LLM—local Ollama or a free-tier cloud provider (Groq/Gemini/OpenRouter). No paid AI service required.
 
@@ -12,6 +12,7 @@ What this project demonstrates end to end:
 - PostgreSQL full-text retrieval (`websearch_to_tsquery` + `ts_rank`)
 - LLM answers grounded in retrieved excerpts via a provider-agnostic client
 - **Groundedness Audit**: claim-level citation validation, entailment verification, 0–100 score, persisted audit trail
+- chat sessions with SSE token streaming, multi-turn context, and a sessions sidebar
 - document library UI with download and a real-browser E2E smoke test
 
 ## Features
@@ -20,6 +21,9 @@ What this project demonstrates end to end:
 - upload PDF or TXT (10 MB limit); unsupported/oversized files rejected with clear errors
 - text extraction (pdf-parse v2), chunking (~900 chars, 120 overlap), original file stored under a generated name
 - ask questions; relevant chunks retrieved with PostgreSQL full-text search
+- **chat sessions**: every exchange lands in a persistent session; multi-turn prompt (last 6 turns) with fresh retrieval per question; rename/delete from the sidebar; reload restores the thread
+- **SSE streaming**: answers stream token by token (`sources` → `token`* → `verification` → `done`); a Stop button aborts the stream and the partial turn is not persisted; plain-JSON clients still get the full response
+- dark-by-default UI with a light-mode toggle (persisted, no theme flash)
 - answer generated from retrieved excerpts only, with `[S1]`-style citations
 - **Groundedness Audit**: each claim checked against its cited excerpts by a second LLM pass → SUPPORTED / PARTIAL / UNSUPPORTED / NO CITATION, plus an overall 0–100 score, persisted in `answer_verifications`
 - abstention when retrieval finds nothing ("I could not find the answer in the uploaded documents")—no sources, no audit, no LLM call
@@ -45,24 +49,26 @@ internal-knowledge-assistant/
 │   │   ├── e2e/                    # Playwright smoke test + fixture
 │   │   ├── playwright.config.ts
 │   │   └── src/
-│   │       ├── api/client.ts       # typed fetch wrapper + auth token
-│   │       ├── components/         # UploadForm, DocumentList, QuestionForm,
-│   │       │                       # AnswerCard, SourceList, VerificationPanel
-│   │       ├── pages/              # LoginPage, AssistantPage
+│   │       ├── api/client.ts       # typed fetch wrapper, auth token, SSE ask stream
+│   │       ├── components/         # Sidebar, ChatPage thread (ChatMessage, Composer),
+│   │       │                       # DocumentsModal, SourceList, VerificationPanel,
+│   │       │                       # RichText, UploadForm, DocumentList, icons
+│   │       ├── pages/              # LoginPage, ChatPage
+│   │       ├── router.tsx          # routes, auth guard, layout + sessions
+│   │       ├── theme.ts            # dark/light theme (pre-paint)
 │   │       ├── types.ts
-│   │       ├── App.tsx
 │   │       └── main.tsx
 │   └── backend/
 │       ├── src/
 │       │   ├── middleware/         # auth (JWT)
-│       │   ├── routes/             # auth, documents, questions (+types)
+│       │   ├── routes/             # auth, documents, questions (+SSE), conversations
 │       │   ├── services/           # llm (OpenAI-compatible), extractText,
 │       │   │                       # chunkText, verifyAnswer (Groundedness Audit)
 │       │   ├── app.ts              # express app, CORS, routes, error mapping
 │       │   ├── db.ts               # pg pool (root .env)
 │       │   ├── seed.ts             # demo user
 │       │   └── server.ts           # entrypoint
-│       ├── schema.sql              # users, documents, chunks,
+│       ├── schema.sql              # users, documents, chunks, conversations,
 │       │                           # qa_history, answer_verifications
 │       ├── test/                   # jest config, global setup, fixtures,
 │       │                           # unit + integration tests
@@ -77,12 +83,12 @@ internal-knowledge-assistant/
 ```text
 React + TypeScript UI (Vite, :5173)
         |
-        | JWT / JSON API
+        | JWT / JSON API + SSE answer stream
         v
 Express + TypeScript API (:4000)
         |
-        +--> PostgreSQL (users, documents, chunks, qa_history,
-        |                 answer_verifications)
+        +--> PostgreSQL (users, documents, chunks, conversations,
+        |                 qa_history, answer_verifications)
         |
         +--> Local file storage (original uploads, generated filenames)
         |
@@ -96,9 +102,9 @@ The retrieval-augmented generation pipeline:
 1. upload document → extract text → reject empty/scanned-only files
 2. split into overlapping chunks → persist file, metadata, chunks
 3. on a question: full-text search over the owner's chunks → top excerpts labeled `[S1]`, `[S2]`, …
-4. answer with the LLM using only those excerpts (instructions treat excerpts as untrusted data)
+4. answer with the LLM using only those excerpts (instructions treat excerpts as untrusted data); the last 6 conversation turns are included as context, retrieval stays fresh per question
 5. **audit**: parse claims → validate citation labels against actually-returned sources → LLM entailment check per claim → score 0–100 → persist in the same transaction as the answer
-6. return `{ answer, sources, verification }` to the UI
+6. stream `{ sources, tokens…, verification, done }` over SSE (or return `{ answer, sources, verification }` as JSON); the turn and its session are persisted with the answer
 
 If retrieval returns nothing, the API short-circuits with an honest abstention (no LLM call). If the verifier fails or times out, claims degrade to `unverified`—the answer is always delivered.
 

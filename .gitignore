@@ -11,3 +11,4 @@ apps/backend/uploads/*
 apps/backend/test-uploads/
 test-results/
 playwright-report/
+.playwright-cli/
