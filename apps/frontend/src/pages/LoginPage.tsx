@@ -57,12 +57,6 @@ export default function LoginPage() {
     <div className="auth-shell">
       <div className="auth-split" data-mode={mode}>
         <div className="auth-form">
-          <div className="form-brand" aria-hidden="true">
-            <span className="brand-mark">
-              <IconLibrary size={13} />
-            </span>
-            Knowledge Assistant
-          </div>
           <form onSubmit={handleSubmit} aria-label={mode === 'login' ? 'Log in' : 'Sign up'}>
             <div className="auth-fields">
               <div className="field">

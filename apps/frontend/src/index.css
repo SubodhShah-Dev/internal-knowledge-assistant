@@ -1259,17 +1259,6 @@ input[type='file']::file-selector-button {
   }
 }
 
-/* Mobile-only brand row (info panel carries the brand on desktop). */
-.form-brand {
-  display: none;
-  align-items: center;
-  gap: var(--space-2);
-  margin-bottom: var(--space-4);
-  font-size: 14px;
-  font-weight: 650;
-  color: var(--text);
-}
-
 .auth-brand {
   display: flex;
   align-items: center;
@@ -1393,32 +1382,46 @@ input[type='file']::file-selector-button {
   color: var(--accent);
 }
 
-/* Stack: form first (errors in the info panel land right under the button). */
+/* Compact two-column mode: tighter padding/type, columns never stack. */
 @media (max-width: 720px) {
+  .auth-shell {
+    padding: var(--space-3);
+  }
+
   .auth-split {
-    grid-template-columns: 1fr;
     min-height: 0;
   }
 
-  .auth-split[data-mode] .auth-form {
-    order: 1;
-    border-inline-end: none;
-    animation: none;
+  .auth-form,
+  .auth-info {
+    padding: var(--space-4) var(--space-3);
   }
 
-  .auth-split[data-mode] .auth-info {
-    order: 2;
-    border-inline-end: none;
-    border-block-start: 1px solid var(--border);
-    animation: none;
+  .auth-info h1 {
+    font-size: clamp(20px, 5vw, 26px);
   }
 
-  .form-brand {
-    display: flex;
+  .demo-creds {
+    padding: var(--space-2) var(--space-3);
   }
 
-  /* The form row already brands the card; don't repeat it in the info panel. */
-  .auth-info .auth-brand {
+  .demo-row {
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+
+  .auth-fields {
+    gap: var(--space-2);
+  }
+
+  .auth-actions {
+    margin-top: var(--space-3);
+  }
+}
+
+@media (max-width: 480px) {
+  .auth-lede,
+  .auth-brand-name {
     display: none;
   }
 }
