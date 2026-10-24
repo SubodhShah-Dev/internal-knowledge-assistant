@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import type { ConversationSummary } from '../types';
 import {
+  IconChat,
   IconLibrary,
   IconLogout,
   IconMoon,
@@ -16,6 +17,7 @@ type Props = {
   sessions: ConversationSummary[];
   activeId: number | null;
   open: boolean;
+  rail: boolean;
   theme: 'dark' | 'light';
   email: string;
   onNewChat: () => void;
@@ -93,6 +95,9 @@ function SessionRow({
           onClick={onNavigate}
           title={session.title}
         >
+          <span className="session-rail-icon" aria-hidden="true">
+            <IconChat size={16} />
+          </span>
           <span className="session-title">{session.title}</span>
           <span className="session-meta">
             {timeAgo(session.updated_at)} · {Number(session.message_count)}{' '}
@@ -129,6 +134,7 @@ export default function Sidebar({
   sessions,
   activeId,
   open,
+  rail,
   theme,
   email,
   onNewChat,
@@ -140,6 +146,8 @@ export default function Sidebar({
   onDelete,
   onNavigate
 }: Props) {
+  const toggleLabel = open ? 'Close sidebar' : rail ? 'Expand sidebar' : 'Collapse sidebar';
+
   return (
     <aside className={`sidebar${open ? ' open' : ''}`} aria-label="Chat sessions">
       <div className="sidebar-top">
@@ -147,22 +155,22 @@ export default function Sidebar({
           <span className="brand-mark" aria-hidden="true">
             <IconLibrary size={15} />
           </span>
-          Knowledge Assistant
+          <span className="brand-name">Knowledge Assistant</span>
         </span>
         <div className="header-spacer" />
         <button
           className="btn btn-ghost btn-icon"
-          aria-label="Collapse sidebar"
-          title="Collapse sidebar"
+          aria-label={toggleLabel}
+          title={toggleLabel}
           onClick={onToggleSidebar}
         >
           <IconSidebar size={17} />
         </button>
       </div>
 
-      <button className="btn new-chat" onClick={onNewChat}>
+      <button className="btn new-chat" aria-label="New chat" onClick={onNewChat}>
         <IconPlus size={16} />
-        New chat
+        <span className="new-chat-label">New chat</span>
       </button>
 
       <div className="sidebar-label">Sessions</div>
@@ -183,7 +191,11 @@ export default function Sidebar({
       </ul>
 
       <div className="sidebar-footer">
-        <button className="sidebar-footer-row" onClick={onOpenDocuments}>
+        <button
+          className="sidebar-footer-row"
+          aria-label="Documents"
+          onClick={onOpenDocuments}
+        >
           <IconLibrary size={16} />
           <span className="user-email">Documents</span>
         </button>
@@ -198,7 +210,7 @@ export default function Sidebar({
         <div className="sidebar-footer-row" title={email}>
           <span className="user-email">{email}</span>
         </div>
-        <button className="sidebar-footer-row" onClick={onLogout}>
+        <button className="sidebar-footer-row" aria-label="Log out" onClick={onLogout}>
           <IconLogout size={16} />
           <span className="user-email">Log out</span>
         </button>

@@ -108,18 +108,43 @@ test('abstention: unrelated question with no matching evidence', async ({ page }
   await expect(page.locator('.session-item')).toHaveCount(1);
 });
 
+test('desktop sidebar collapses to an icon rail and persists across reload', async ({ page }) => {
+  await signUp(page);
+  const sidebar = page.locator('.sidebar');
+  await expect(sidebar.locator('.brand-name')).toBeVisible();
+
+  // Collapse via the sidebar's own button: icon-only rail.
+  await page.getByRole('button', { name: /collapse sidebar/i }).click();
+  await expect(sidebar).toHaveCSS('width', '60px');
+  await expect(sidebar.locator('.brand-name')).toBeHidden();
+  await expect(sidebar.locator('.session-rail-icon')).toBeHidden();
+
+  // Header hamburger expands it again.
+  await page.getByRole('button', { name: /toggle sidebar/i }).click();
+  await expect(sidebar.locator('.brand-name')).toBeVisible();
+  await expect(sidebar).toHaveCSS('width', '272px');
+
+  // Rail state persists across reload.
+  await page.getByRole('button', { name: /collapse sidebar/i }).click();
+  await expect(sidebar).toHaveCSS('width', '60px');
+  await page.reload();
+  await expect(sidebar).toHaveCSS('width', '60px', { timeout: 20_000 });
+  await expect(sidebar.locator('.brand-name')).toBeHidden();
+});
+
 test.describe('mobile layout', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
   test('drawer opens and closes at 390x844', async ({ page }) => {
     await signUp(page);
 
-    const hamburger = page.getByRole('button', { name: /open sidebar/i });
-    await expect(hamburger).toBeVisible();
+    const toggle = page.getByRole('button', { name: /toggle sidebar/i });
+    await expect(toggle).toBeVisible();
 
-    await hamburger.click();
+    await toggle.click();
     const sidebar = page.locator('.sidebar');
     await expect(sidebar).toHaveClass(/open/);
+    await expect(sidebar).toHaveCSS('width', '272px');
     await expect(page.getByRole('button', { name: /new chat/i })).toBeVisible();
 
     await page.getByRole('button', { name: /close sidebar/i }).first().click();

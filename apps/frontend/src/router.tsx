@@ -25,8 +25,13 @@ export type RootOutletContext = {
   onUnauthorized: () => void;
   onOpenDocuments: () => void;
   onToggleSidebar: () => void;
+  sidebarVisible: boolean;
   title: string;
+  attachedDocIds: string[];
+  setAttachedDocIds: (ids: string[]) => void;
 };
+
+const RAIL_KEY = 'sidebarRail';
 
 function RootLayout() {
   const navigate = useNavigate();
@@ -35,10 +40,37 @@ function RootLayout() {
   const activeMatch = /^\/c\/(\d+)$/.exec(location.pathname);
   const activeId = activeMatch ? Number(activeMatch[1]) : null;
   const [sessions, setSessions] = useState<ConversationSummary[]>([]);
+  // Desktop: rail = collapsed icon strip. Mobile: open = slide-in drawer.
+  const [rail, setRail] = useState(() => localStorage.getItem(RAIL_KEY) === '1');
+  const [isDesktop, setIsDesktop] = useState(() =>
+    window.matchMedia('(min-width: 901px)').matches
+  );
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [documentsVersion, setDocumentsVersion] = useState(0);
+  const [attachedDocIds, setAttachedDocIds] = useState<string[]>([]);
   const [theme, setTheme] = useState<Theme>(getTheme());
+
+  useEffect(() => {
+    localStorage.setItem(RAIL_KEY, rail ? '1' : '0');
+  }, [rail]);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 901px)');
+    setIsDesktop(mq.matches);
+    const onChange = (event: MediaQueryListEvent) => {
+      setIsDesktop(event.matches);
+      // The drawer only exists below 901px; drop its state on crossing up.
+      if (event.matches) setSidebarOpen(false);
+    };
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
+  const toggleSidebar = useCallback(() => {
+    if (window.matchMedia('(min-width: 901px)').matches) setRail(current => !current);
+    else setSidebarOpen(current => !current);
+  }, []);
 
   const refreshSessions = useCallback(async () => {
     try {
@@ -70,7 +102,7 @@ function RootLayout() {
       : '';
 
   return (
-    <div className="app-layout">
+    <div className={`app-layout${rail ? ' rail' : ''}`}>
       <button
         className={`sidebar-backdrop${sidebarOpen ? ' visible' : ''}`}
         aria-label="Close sidebar"
@@ -80,13 +112,14 @@ function RootLayout() {
         sessions={sessions}
         activeId={activeId}
         open={sidebarOpen}
+        rail={rail}
         theme={theme}
         email={email}
         onNewChat={() => {
           setSidebarOpen(false);
           navigate('/');
         }}
-        onToggleSidebar={() => setSidebarOpen(false)}
+        onToggleSidebar={toggleSidebar}
         onOpenDocuments={() => {
           setSidebarOpen(false);
           setModalOpen(true);
@@ -119,8 +152,11 @@ function RootLayout() {
             refreshSessions,
             onUnauthorized: handleUnauthorized,
             onOpenDocuments: () => setModalOpen(true),
-            onToggleSidebar: () => setSidebarOpen(open => !open),
-            title
+            onToggleSidebar: toggleSidebar,
+            sidebarVisible: isDesktop ? rail : sidebarOpen,
+            title,
+            attachedDocIds,
+            setAttachedDocIds
           } satisfies RootOutletContext
         }
       />
@@ -128,6 +164,10 @@ function RootLayout() {
       <DocumentsModal
         open={modalOpen}
         refreshToken={documentsVersion}
+        conversationId={activeId}
+        attachedDocIds={attachedDocIds}
+        onAttach={(docId) => setAttachedDocIds(prev => prev.includes(docId) ? prev : [...prev, docId])}
+        onDetach={(docId) => setAttachedDocIds(prev => prev.filter(id => id !== docId))}
         onClose={() => setModalOpen(false)}
         onUploaded={() => setDocumentsVersion(version => version + 1)}
         onUnauthorized={handleUnauthorized}

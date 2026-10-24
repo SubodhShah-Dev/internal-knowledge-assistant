@@ -30,13 +30,14 @@ type LlmConfig = {
   timeoutMs: number;
 };
 
-function readConfig(): LlmConfig {
-  return {
+function readConfig(override?: Partial<LlmConfig>): LlmConfig {
+  const base = {
     baseUrl: (process.env.LLM_BASE_URL || 'https://api.groq.com/openai/v1').replace(/\/+$/, ''),
     apiKey: process.env.LLM_API_KEY || '',
     model: process.env.LLM_MODEL || 'openai/gpt-oss-120b',
     timeoutMs: Number(process.env.LLM_TIMEOUT_MS || 60000)
   };
+  return { ...base, ...override };
 }
 
 export function llmModel(): string {
@@ -45,9 +46,9 @@ export function llmModel(): string {
 
 export async function chat(
   messages: ChatMessage[],
-  options: { temperature?: number } = {}
+  options: { temperature?: number; modelConfig?: Partial<LlmConfig> } = {}
 ): Promise<string> {
-  const { baseUrl, apiKey, model, timeoutMs } = readConfig();
+  const { baseUrl, apiKey, model, timeoutMs } = readConfig(options.modelConfig);
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
 
@@ -92,9 +93,9 @@ export async function chat(
  */
 export async function* chatStream(
   messages: ChatMessage[],
-  options: { temperature?: number; signal?: AbortSignal } = {}
+  options: { temperature?: number; signal?: AbortSignal; modelConfig?: Partial<LlmConfig> } = {}
 ): AsyncGenerator<string> {
-  const { baseUrl, apiKey, model, timeoutMs } = readConfig();
+  const { baseUrl, apiKey, model, timeoutMs } = readConfig(options.modelConfig);
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
 

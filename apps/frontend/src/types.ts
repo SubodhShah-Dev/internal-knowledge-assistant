@@ -26,6 +26,7 @@ export type AskResponse = {
   verification: Verification | null;
   conversationId?: number;
   messageId?: number;
+  model?: string;
 };
 
 export type ConversationSummary = {
@@ -50,6 +51,7 @@ export type ConversationDetail = {
   title: string;
   created_at: string;
   updated_at: string;
+  documents: DocumentMeta[];
   turns: ConversationTurn[];
 };
 

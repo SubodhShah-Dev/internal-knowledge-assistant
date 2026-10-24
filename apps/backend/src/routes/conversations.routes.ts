@@ -50,8 +50,18 @@ conversationsRouter.get('/:id', requireAuth, async (req, res, next) => {
       [id, req.user?.id]
     );
 
+    const { rows: docs } = await pool.query(
+      `SELECT d.id::text AS id, d.title, d.original_name, d.byte_size, d.created_at
+       FROM documents d
+       JOIN conversation_documents cd ON cd.document_id = d.id
+       WHERE cd.conversation_id = $1 AND d.owner_id = $2
+       ORDER BY d.created_at DESC`,
+      [id, req.user?.id]
+    );
+
     res.json({
       ...conversation,
+      documents: docs ?? [],
       turns: turns.map(row => ({
         id: row.id,
         question: row.question,
@@ -80,11 +90,28 @@ conversationsRouter.patch('/:id', requireAuth, async (req, res, next) => {
       return res.status(400).json({ error: 'Title must be between 1 and 120 characters.' });
     }
 
+    let modelIdParam: string | null = null;
+    if (req.body.modelId !== undefined && req.body.modelId !== null) {
+      modelIdParam = String(req.body.modelId);
+    }
+
+    let modelUuid: string | null = null;
+    if (modelIdParam) {
+      const { rows: modelRows } = await pool.query(
+        'SELECT id FROM models WHERE model_id = $1 AND is_enabled = true',
+        [modelIdParam]
+      );
+      if (!modelRows[0]) {
+        return res.status(400).json({ error: 'Invalid or disabled model.' });
+      }
+      modelUuid = modelRows[0].id;
+    }
+
     const { rows } = await pool.query(
-      `UPDATE conversations SET title = $3, updated_at = now()
+      `UPDATE conversations SET title = $3, model_id = $4, updated_at = now()
        WHERE id = $1 AND user_id = $2
-       RETURNING id, title, updated_at`,
-      [id, req.user?.id, title]
+       RETURNING id, title, model_id, updated_at`,
+      [id, req.user?.id, title, modelUuid]
     );
     if (!rows[0]) {
       return res.status(404).json({ error: 'Conversation not found.' });
@@ -106,6 +133,63 @@ conversationsRouter.delete('/:id', requireAuth, async (req, res, next) => {
       return res.status(404).json({ error: 'Conversation not found.' });
     }
     res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+conversationsRouter.post('/:id/documents', requireAuth, async (req, res, next) => {
+  const conversationId = Number(req.params.id);
+  const { documentId } = req.body;
+  if (!documentId || typeof documentId !== 'string') {
+    return res.status(400).json({ error: 'documentId is required.' });
+  }
+  try {
+    const { rows } = await pool.query(
+      'SELECT id FROM conversations WHERE id = $1 AND user_id = $2',
+      [conversationId, req.user?.id]
+    );
+    if (!rows[0]) {
+      return res.status(404).json({ error: 'Conversation not found.' });
+    }
+    const docOwner = await pool.query(
+      'SELECT id FROM documents WHERE id = $1 AND owner_id = $2',
+      [documentId, req.user?.id]
+    );
+    if (!docOwner.rows[0]) {
+      return res.status(404).json({ error: 'Document not found.' });
+    }
+    await pool.query(
+      `INSERT INTO conversation_documents (conversation_id, document_id)
+       VALUES ($1, $2)
+       ON CONFLICT DO NOTHING`,
+      [conversationId, documentId]
+    );
+    res.status(201).json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+conversationsRouter.delete('/:id/documents/:docId', requireAuth, async (req, res, next) => {
+  const conversationId = Number(req.params.id);
+  const { docId } = req.params;
+  try {
+    const convExists = await pool.query(
+      'SELECT id FROM conversations WHERE id = $1 AND user_id = $2',
+      [conversationId, req.user?.id]
+    );
+    if (!convExists.rows[0]) {
+      return res.status(404).json({ error: 'Conversation not found.' });
+    }
+    const { rowCount } = await pool.query(
+      'DELETE FROM conversation_documents WHERE conversation_id = $1 AND document_id = $2',
+      [conversationId, docId]
+    );
+    if (!rowCount) {
+      return res.status(404).json({ error: 'Document not attached to this conversation.' });
+    }
+    res.status(204).send();
   } catch (error) {
     next(error);
   }

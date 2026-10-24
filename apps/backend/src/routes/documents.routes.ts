@@ -123,3 +123,29 @@ documentsRouter.get('/:id/file', requireAuth, async (req, res, next) => {
     next(error);
   }
 });
+
+documentsRouter.delete('/:id', requireAuth, async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      `DELETE FROM documents WHERE id = $1 AND owner_id = $2 RETURNING stored_path`,
+      [id, req.user?.id]
+    );
+    if (!rows[0]) {
+      return res.status(404).json({ error: 'Document not found.' });
+    }
+    const { stored_path } = rows[0];
+    if (!stored_path.startsWith('seed://')) {
+      await unlink(stored_path).catch(() => undefined);
+    }
+    await client.query('COMMIT');
+    res.status(204).send();
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    next(error);
+  } finally {
+    client.release();
+  }
+});
