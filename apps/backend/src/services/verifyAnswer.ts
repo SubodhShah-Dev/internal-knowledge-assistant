@@ -1,4 +1,4 @@
-import { chat, llmModel, LlmUnavailableError, type ChatMessage } from './llm';
+import { chat, llmModel, LlmUnavailableError, type ChatMessage, type LlmConfig } from './llm';
 import type { Source } from '../routes/questions.types';
 
 export type ClaimStatus = 'supported' | 'partial' | 'unsupported' | 'uncited' | 'unverified';
@@ -21,9 +21,12 @@ const LABEL_PATTERN = /\[\s*(S\d+)\s*\]/g;
 const INVISIBLE_CHARS = /[\u200B\u200C\u200D\u2060\uFEFF]/g;
 const SENTENCE_SPLIT = /(?<=[.!?])\s+|\n+/;
 
-/** Strip invisible Unicode (zero-width spaces etc.) that models sprinkle into answers. */
+/** Strip invisible Unicode and canonicalize citation brackets. Models occasionally
+ * emit CJK/fullwidth brackets (【S1】, ［S1］) instead of ASCII [S1]; every parser
+ * downstream matches ASCII only, so normalize here — routes call this before
+ * verify + persist + the done event. */
 export function normalizeAnswerText(answer: string): string {
-  return answer.replace(INVISIBLE_CHARS, '');
+  return answer.replace(INVISIBLE_CHARS, '').replace(/[【［]\s*(S\d+)\s*[】］]/g, '[$1]');
 }
 
 /**
@@ -137,7 +140,7 @@ function parseVerifierJson(raw: string, claimCount: number): ClaimStatus[] | nul
  * Never throws; degrades to an "unverified" result so the answer is always
  * delivered.
  */
-export async function verifyAnswer(answer: string, sources: Source[]): Promise<Verification> {
+export async function verifyAnswer(answer: string, sources: Source[], modelConfig?: Partial<LlmConfig>): Promise<Verification> {
   const parsed = parseClaims(answer);
   if (parsed.length === 0 || sources.length === 0) {
     return unverifiedResult(parsed);
@@ -159,7 +162,7 @@ export async function verifyAnswer(answer: string, sources: Source[]): Promise<V
   if (pendingIndexes.length > 0) {
     try {
       const pendingClaims = pendingIndexes.map(index => parsed[index]);
-      const raw = await chat(buildVerifierPrompt(answer, sources, pendingClaims), { temperature: 0 });
+      const raw = await chat(buildVerifierPrompt(answer, sources, pendingClaims), { temperature: 0, modelConfig });
       const statuses = parseVerifierJson(raw, pendingClaims.length);
       if (statuses) {
         pendingIndexes.forEach((claimIndex, i) => {
@@ -192,6 +195,6 @@ export async function verifyAnswer(answer: string, sources: Source[]): Promise<V
   return { status, score, claims };
 }
 
-export function verifierModel(): string {
-  return llmModel();
+export function verifierModel(model?: string): string {
+  return model ?? llmModel();
 }

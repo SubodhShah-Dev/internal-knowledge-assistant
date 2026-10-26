@@ -9,19 +9,25 @@ import {
 import {
   clearToken,
   deleteConversation,
+  getAdminToken,
+  getUsage,
   getToken,
   listConversations,
   renameConversation
 } from './api/client';
-import type { ConversationSummary } from './types';
+import type { ConversationSummary, UsageSnapshot } from './types';
 import { getTheme, toggleTheme, type Theme } from './theme';
 import Sidebar from './components/Sidebar';
 import DocumentsModal from './components/DocumentsModal';
 import LoginPage from './pages/LoginPage';
 import ChatPage from './pages/ChatPage';
+import DocumentsPage from './pages/DocumentsPage';
+import AdminLogin from './pages/AdminLogin';
+import AdminPage from './pages/AdminPage';
 
 export type RootOutletContext = {
   refreshSessions: () => Promise<void>;
+  refreshUsage: () => Promise<void>;
   onUnauthorized: () => void;
   onOpenDocuments: () => void;
   onToggleSidebar: () => void;
@@ -49,6 +55,7 @@ function RootLayout() {
   const [modalOpen, setModalOpen] = useState(false);
   const [documentsVersion, setDocumentsVersion] = useState(0);
   const [attachedDocIds, setAttachedDocIds] = useState<string[]>([]);
+  const [usage, setUsage] = useState<UsageSnapshot | null>(null);
   const [theme, setTheme] = useState<Theme>(getTheme());
 
   useEffect(() => {
@@ -80,10 +87,19 @@ function RootLayout() {
     }
   }, []);
 
+  const refreshUsage = useCallback(async () => {
+    try {
+      setUsage(await getUsage());
+    } catch {
+      // Non-fatal: the sidebar keeps its last known usage value.
+    }
+  }, []);
+
   useEffect(() => {
     if (!getToken()) return;
     void refreshSessions();
-  }, [refreshSessions]);
+    void refreshUsage();
+  }, [refreshSessions, refreshUsage]);
 
   const handleUnauthorized = useCallback(() => {
     clearToken();
@@ -108,21 +124,23 @@ function RootLayout() {
         aria-label="Close sidebar"
         onClick={() => setSidebarOpen(false)}
       />
-      <Sidebar
-        sessions={sessions}
-        activeId={activeId}
-        open={sidebarOpen}
-        rail={rail}
-        theme={theme}
-        email={email}
-        onNewChat={() => {
+        <Sidebar
+          sessions={sessions}
+          activeId={activeId}
+          open={sidebarOpen}
+          rail={rail}
+          theme={theme}
+          email={email}
+          usage={usage}
+          isAdmin={!!getAdminToken()}
+          onNewChat={() => {
           setSidebarOpen(false);
           navigate('/');
         }}
         onToggleSidebar={toggleSidebar}
         onOpenDocuments={() => {
           setSidebarOpen(false);
-          setModalOpen(true);
+          navigate('/documents');
         }}
         onToggleTheme={() => setTheme(toggleTheme())}
         onLogout={handleUnauthorized}
@@ -150,6 +168,7 @@ function RootLayout() {
         context={
           {
             refreshSessions,
+            refreshUsage,
             onUnauthorized: handleUnauthorized,
             onOpenDocuments: () => setModalOpen(true),
             onToggleSidebar: toggleSidebar,
@@ -161,17 +180,20 @@ function RootLayout() {
         }
       />
 
-      <DocumentsModal
-        open={modalOpen}
-        refreshToken={documentsVersion}
-        conversationId={activeId}
-        attachedDocIds={attachedDocIds}
-        onAttach={(docId) => setAttachedDocIds(prev => prev.includes(docId) ? prev : [...prev, docId])}
-        onDetach={(docId) => setAttachedDocIds(prev => prev.filter(id => id !== docId))}
-        onClose={() => setModalOpen(false)}
-        onUploaded={() => setDocumentsVersion(version => version + 1)}
-        onUnauthorized={handleUnauthorized}
-      />
+      {/* Mounted only while open: keeps one UploadForm (one file input) in the DOM. */}
+      {modalOpen && (
+        <DocumentsModal
+          open
+          refreshToken={documentsVersion}
+          conversationId={activeId}
+          attachedDocIds={attachedDocIds}
+          onAttach={(docId) => setAttachedDocIds(prev => prev.includes(docId) ? prev : [...prev, docId])}
+          onDetach={(docId) => setAttachedDocIds(prev => prev.filter(id => id !== docId))}
+          onClose={() => setModalOpen(false)}
+          onUploaded={() => setDocumentsVersion(version => version + 1)}
+          onUnauthorized={handleUnauthorized}
+        />
+      )}
     </div>
   );
 }
@@ -181,13 +203,21 @@ function LoginRoute() {
   return <LoginPage />;
 }
 
+function AdminRoute() {
+  if (!getAdminToken()) return <Navigate to="/admin/login" replace />;
+  return <AdminPage />;
+}
+
 export const router = createBrowserRouter([
   { path: '/login', element: <LoginRoute /> },
+  { path: '/admin/login', element: <AdminLogin /> },
+  { path: '/admin', element: <AdminRoute /> },
   {
     element: <RootLayout />,
     children: [
       { path: '/', element: <ChatPage /> },
       { path: '/c/:conversationId', element: <ChatPage /> },
+      { path: '/documents', element: <DocumentsPage /> },
       { path: '*', element: <Navigate to="/" replace /> }
     ]
   }

@@ -3,8 +3,10 @@ import type {
   AuthResponse,
   ConversationDetail,
   ConversationSummary,
+  DocumentDetail,
   DocumentMeta,
   Source,
+  UsageSnapshot,
   Verification
 } from '../types';
 
@@ -164,6 +166,16 @@ export async function getEnabledModels(): Promise<Array<{ id: string; label: str
   return apiFetch<Array<{ id: string; label: string; model_id: string; is_default: boolean }>>('/models');
 }
 
+export async function getCurrentModel(): Promise<{ model_id: string | null; base_url: string | null; provider: string | null; source: string | null }> {
+  return apiAdminFetch<{ model_id: string | null; base_url: string | null; provider: string | null; source: string | null }>('/admin/current-model');
+}
+
+export async function setDefaultModel(modelId: string): Promise<{ ok: boolean }> {
+  return apiAdminFetch<{ ok: boolean }>(`/admin/models/${modelId}/default`, {
+    method: 'POST'
+  });
+}
+
 export async function signup(email: string, password: string): Promise<AuthResponse> {
   return apiFetch<AuthResponse>('/auth/signup', {
     method: 'POST',
@@ -185,8 +197,18 @@ export async function uploadDocument(file: File): Promise<{ document: DocumentMe
   return apiFetch('/documents', { method: 'POST', body: form });
 }
 
-export async function listDocuments(): Promise<DocumentMeta[]> {
-  return apiFetch<DocumentMeta[]>('/documents');
+export async function listDocuments(query?: string): Promise<DocumentMeta[]> {
+  const trimmed = query?.trim();
+  const qs = trimmed ? `?q=${encodeURIComponent(trimmed)}` : '';
+  return apiFetch<DocumentMeta[]>(`/documents${qs}`);
+}
+
+export async function getDocument(documentId: string): Promise<DocumentDetail> {
+  return apiFetch<DocumentDetail>(`/documents/${documentId}`);
+}
+
+export async function getUsage(): Promise<UsageSnapshot> {
+  return apiFetch<UsageSnapshot>('/usage');
 }
 
 export async function askQuestion(question: string, conversationId?: number, documentIds?: string[], modelId?: string): Promise<AskResponse> {

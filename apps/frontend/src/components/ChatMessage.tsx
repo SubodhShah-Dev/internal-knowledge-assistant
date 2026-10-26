@@ -58,7 +58,7 @@ export default function ChatMessage({ message }: Props) {
         )}
 
         {!streaming && message.verification && (
-          <details className="msg-section" open>
+          <details className="msg-section">
             <summary>
               <IconChevron size={14} className="chevron" />
               Groundedness Audit · {message.verification.score}%

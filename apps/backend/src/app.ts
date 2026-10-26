@@ -8,6 +8,7 @@ import { documentsRouter } from './routes/documents.routes';
 import { conversationsRouter } from './routes/conversations.routes';
 import { questionsRouter } from './routes/questions.routes';
 import { adminRouter } from './routes/admin.routes';
+import { usageRouter } from './routes/usage.routes';
 import { LlmUnavailableError } from './services/llm';
 
 export const app = express();
@@ -25,6 +26,7 @@ app.use('/api/auth', authRouter);
 app.use('/api/documents', documentsRouter);
 app.use('/api/conversations', conversationsRouter);
 app.use('/api/questions', questionsRouter);
+app.use('/api/usage', usageRouter);
 app.use('/api', adminRouter);
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

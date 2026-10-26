@@ -1,13 +1,14 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { login, setAdminToken, clearAdminToken } from '../api/client';
 
 export default function AdminLogin() {
   const navigate = useNavigate();
-  const [email, setEmail] = useState('admin@example.com');
-  const [password, setPassword] = useState('AdminPassword123!');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const emailRef = useRef<HTMLInputElement>(null);
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -32,6 +33,16 @@ export default function AdminLogin() {
     clearAdminToken();
     navigate('/login', { replace: true });
   }
+
+  const DEMO_EMAIL = 'admin@example.com';
+  const DEMO_PASSWORD = 'AdminPassword123!';
+
+  const useDemoCredentials = () => {
+    setEmail(DEMO_EMAIL);
+    setPassword(DEMO_PASSWORD);
+    setError('');
+    emailRef.current?.focus();
+  };
 
   return (
     <div className="auth-shell">
@@ -94,7 +105,9 @@ export default function AdminLogin() {
               <span>Password</span>
               <code>AdminPassword123!</code>
             </div>
-            <div className="demo-fill">Fill and sign in</div>
+            <button type="button" className="btn btn-ghost demo-fill" onClick={useDemoCredentials}>
+              Fill and sign in
+            </button>
           </div>
         </div>
       </div>

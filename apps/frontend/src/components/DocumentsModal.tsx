@@ -1,9 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ApiError, attachDocument, deleteDocument, detachDocument, downloadDocument, listDocuments } from '../api/client';
-import type { DocumentMeta } from '../types';
+import {
+  ApiError,
+  deleteDocument,
+  downloadDocument,
+  getDocument,
+  listDocuments
+} from '../api/client';
+import type { DocumentDetail, DocumentMeta } from '../types';
+import { formatBytes, formatDate } from '../format';
 import UploadForm from './UploadForm';
-import DocumentList from './DocumentList';
-import { IconClose, IconDownload, IconFile, IconRefresh, IconTrash } from './icons';
+import DocumentChunks, { MatchExcerpt } from './DocumentChunks';
+import { IconChevron, IconClose, IconDownload, IconFile, IconPlus, IconRefresh, IconTrash } from './icons';
 
 type Props = {
   open: boolean;
@@ -17,11 +24,7 @@ type Props = {
   onUnauthorized: () => void;
 };
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
+const SEARCH_DEBOUNCE_MS = 250;
 
 export default function DocumentsModal({
   open,
@@ -39,20 +42,37 @@ export default function DocumentsModal({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [downloadingId, setDownloadingId] = useState('');
+  const [query, setQuery] = useState('');
+  const [activeQuery, setActiveQuery] = useState('');
+  const [openingId, setOpeningId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<DocumentDetail | null>(null);
+
+  const requestIdRef = useRef(0);
 
   const load = useCallback(async () => {
+    // Only the newest request may update the list, otherwise a slow earlier
+    // response can overwrite the results of a newer search.
+    const requestId = ++requestIdRef.current;
     setLoading(true);
     setError('');
     try {
-      const docs = await listDocuments();
+      const docs = await listDocuments(activeQuery);
+      if (requestId !== requestIdRef.current) return;
       setAllDocuments(docs);
     } catch (err) {
+      if (requestId !== requestIdRef.current) return;
       if (err instanceof ApiError && err.status === 401) onUnauthorized();
       setError(err instanceof ApiError ? err.message : 'Could not load documents.');
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) setLoading(false);
     }
-  }, [onUnauthorized]);
+  }, [onUnauthorized, activeQuery]);
+
+  // Debounce the search box so we do not query on every keystroke.
+  useEffect(() => {
+    const timer = window.setTimeout(() => setActiveQuery(query.trim()), SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [query]);
 
   useEffect(() => {
     load();
@@ -74,7 +94,24 @@ export default function DocumentsModal({
   }, [onClose]);
 
   const attachedDocuments = allDocuments.filter(doc => attachedDocIds.includes(doc.id));
-  const libraryDocuments = allDocuments.filter(doc => !attachedDocIds.includes(doc.id));
+  const detailId = detail?.document.id ?? null;
+
+  async function toggleView(doc: DocumentMeta) {
+    if (detailId === doc.id) {
+      setDetail(null);
+      return;
+    }
+    setOpeningId(doc.id);
+    setError('');
+    try {
+      setDetail(await getDocument(doc.id));
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) onUnauthorized();
+      setError(err instanceof ApiError ? err.message : 'Could not open the document.');
+    } finally {
+      setOpeningId(null);
+    }
+  }
 
   async function handleDownload(doc: DocumentMeta) {
     setDownloadingId(doc.id);
@@ -96,6 +133,7 @@ export default function DocumentsModal({
       await deleteDocument(doc.id);
       setAllDocuments(prev => prev.filter(d => d.id !== doc.id));
       onDetach(doc.id);
+      if (detailId === doc.id) setDetail(null);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) onUnauthorized();
       setError(err instanceof ApiError ? err.message : 'Delete failed.');
@@ -116,103 +154,134 @@ export default function DocumentsModal({
             <p className="error-text" role="alert">{error}</p>
           )}
 
-          {/* ---------- In this session ---------- */}
+          {/* ---------- Documents (searchable, attached state shown per row) ---------- */}
           <div className="documents-box">
             <div className="documents-head">
-              <h3>In this session</h3>
-              {conversationId === null && (
-                <span className="empty-note" style={{ fontSize: '12px', color: 'var(--text-faint)' }}>
-                  Attached docs will be saved when you ask your first question.
-                </span>
-              )}
+              <div className="documents-head-text">
+                <h3>Documents</h3>
+                <p className="doc-session-note">
+                  {attachedDocuments.length} attached to this session
+                  {conversationId === null ? ' · saved on first question' : ''}
+                </p>
+              </div>
+              <div className="documents-head-actions">
+                <input
+                  className="input doc-search"
+                  type="search"
+                  placeholder="Search title or content…"
+                  aria-label="Search documents by title or content"
+                  value={query}
+                  onChange={event => setQuery(event.target.value)}
+                />
+                <button
+                  className="btn btn-ghost btn-icon"
+                  onClick={load}
+                  disabled={loading}
+                  aria-label="Refresh documents"
+                  title="Refresh"
+                >
+                  <IconRefresh size={15} />
+                </button>
+              </div>
             </div>
-            {loading && attachedDocuments.length === 0 && (
-              <p className="empty-note">Loading attached documents…</p>
-            )}
-            {!loading && attachedDocuments.length === 0 && (
-              <p className="empty-note">No documents attached yet.</p>
-            )}
-            <ul className="document-list">
-              {attachedDocuments.map(doc => (
-                <li key={doc.id} className="document-item">
-                  <span className="document-icon">
-                    <IconFile size={18} />
-                  </span>
-                  <div className="document-info">
-                    <div className="document-title">{doc.title}</div>
-                    <div className="document-meta">
-                      {doc.original_name} · {formatBytes(doc.byte_size)}
-                    </div>
-                  </div>
-                  <button
-                    className="btn btn-ghost btn-icon"
-                    aria-label={`Detach ${doc.title}`}
-                    onClick={() => onDetach(doc.id)}
-                  >
-                    <IconClose size={16} />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          {/* ---------- Library ---------- */}
-          <div className="documents-box" style={{ marginTop: 'var(--space-5)' }}>
-            <div className="documents-head">
-              <h3>Library</h3>
-              <button
-                className="btn btn-ghost"
-                onClick={load}
-                disabled={loading}
-                aria-label="Refresh documents"
-              >
-                <IconRefresh size={15} />
-              </button>
-            </div>
-            {!loading && libraryDocuments.length === 0 && !error && (
-              <p className="empty-note">No documents in library. Upload a PDF or TXT file to get started.</p>
-            )}
             <UploadForm onUploaded={onUploaded} onUnauthorized={onUnauthorized} />
+            {!loading && allDocuments.length === 0 && !error && (
+              <p className="empty-note">
+                {activeQuery
+                  ? `No documents match "${activeQuery}".`
+                  : 'No documents yet. Upload a PDF or TXT file to get started.'}
+              </p>
+            )}
             <ul className="document-list">
-              {libraryDocuments.map(doc => (
-                <li key={doc.id} className="document-item">
-                  <span className="document-icon">
-                    <IconFile size={18} />
-                  </span>
-                  <div className="document-info">
-                    <div className="document-title">{doc.title}</div>
-                    <div className="document-meta">
-                      {doc.original_name} · {formatBytes(doc.byte_size)} ·{' '}
-                      {new Date(doc.created_at).toLocaleDateString()}
+              {allDocuments.map(doc => {
+                const expanded = detailId === doc.id;
+                const attached = attachedDocIds.includes(doc.id);
+                return (
+                  <li key={doc.id} className="document-item doc-page-item">
+                    <div className="doc-row">
+                      <span className="document-icon" aria-hidden="true">
+                        <IconFile size={18} />
+                      </span>
+                      <div className="document-info">
+                        <div className="doc-title-line">
+                          <span className="document-title" title={doc.title}>{doc.title}</span>
+                          {attached && <span className="badge badge-attached">Attached</span>}
+                        </div>
+                        <div className="document-meta">
+                          {doc.original_name} · {formatBytes(Number(doc.byte_size))} ·{' '}
+                          {Number(doc.chunk_count ?? 0)} chunk
+                          {Number(doc.chunk_count ?? 0) === 1 ? '' : 's'} ·{' '}
+                          {formatDate(doc.created_at)}
+                        </div>
+                      </div>
+                      <div className="doc-actions">
+                        <button
+                          className="btn btn-ghost btn-icon"
+                          aria-label={`${expanded ? 'Hide' : 'View'} ${doc.title}`}
+                          aria-expanded={expanded}
+                          title={expanded ? 'Hide contents' : 'View contents'}
+                          onClick={() => toggleView(doc)}
+                        >
+                          <span className={`doc-chevron${expanded ? ' open' : ''}`}>
+                            <IconChevron size={15} />
+                          </span>
+                        </button>
+                        {attached ? (
+                          <button
+                            className="btn btn-ghost btn-icon"
+                            aria-label={`Detach ${doc.title}`}
+                            title="Detach from this session"
+                            onClick={() => onDetach(doc.id)}
+                          >
+                            <IconClose size={16} />
+                          </button>
+                        ) : (
+                          <button
+                            className="btn btn-ghost btn-icon"
+                            aria-label={`Attach ${doc.title} to session`}
+                            title="Attach to this session"
+                            onClick={() => onAttach(doc.id)}
+                          >
+                            <IconPlus size={15} />
+                          </button>
+                        )}
+                        <button
+                          className="btn btn-ghost btn-icon"
+                          aria-label={`Download ${doc.original_name}`}
+                          title="Download"
+                          disabled={downloadingId === doc.id}
+                          onClick={() => handleDownload(doc)}
+                        >
+                          <IconDownload size={15} />
+                        </button>
+                        <button
+                          className="btn btn-danger-ghost btn-icon"
+                          aria-label={`Delete ${doc.title}`}
+                          title="Delete"
+                          onClick={() => handleDelete(doc)}
+                        >
+                          <IconTrash size={15} />
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                  <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
-                    <button
-                      className="btn btn-ghost btn-icon"
-                      aria-label={`Attach ${doc.title} to session`}
-                      onClick={() => onAttach(doc.id)}
-                    >
-                      <span style={{ fontSize: '12px', fontWeight: 600 }}>+</span>
-                    </button>
-                    <button
-                      className="btn btn-ghost"
-                      onClick={() => handleDownload(doc)}
-                      disabled={downloadingId === doc.id}
-                      aria-label={`Download ${doc.original_name}`}
-                    >
-                      <IconDownload size={16} />
-                      {downloadingId === doc.id ? '…' : 'Download'}
-                    </button>
-                    <button
-                      className="btn btn-danger-ghost btn-icon"
-                      aria-label={`Delete ${doc.title}`}
-                      onClick={() => handleDelete(doc)}
-                    >
-                      <IconTrash size={16} />
-                    </button>
-                  </div>
-                </li>
-              ))}
+
+                    {doc.match_excerpt && (
+                      <p className="doc-match">
+                        <MatchExcerpt text={doc.match_excerpt} />
+                      </p>
+                    )}
+
+                    {expanded && detail && (
+                      <DocumentChunks detail={detail} label={`Contents of ${doc.title}`} />
+                    )}
+                    {openingId === doc.id && (
+                      <p className="empty-note" role="status">
+                        Opening contents…
+                      </p>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           </div>
         </div>

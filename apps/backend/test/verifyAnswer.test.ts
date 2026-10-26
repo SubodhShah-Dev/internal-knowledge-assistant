@@ -60,6 +60,24 @@ describe('parseClaims', () => {
     expect(claims[0].sourceLabels).toEqual(['S1']);
   });
 
+  test('normalizes fullwidth CJK citation brackets 【S1】', () => {
+    const claims = parseClaims('Employees get 20 days of leave 【S1】.');
+    expect(claims[0].sourceLabels).toEqual(['S1']);
+    expect(claims[0].text).toContain('[S1]');
+  });
+
+  test('normalizes fullwidth square-bracket citations ［S2］', () => {
+    const claims = parseClaims('Requests need two weeks notice ［ S2 ］.');
+    expect(claims[0].sourceLabels).toEqual(['S2']);
+  });
+
+  test('normalizes mixed ASCII and fullwidth citations in one answer', () => {
+    const claims = parseClaims('Employees get 20 days [S1]. Managers approve requests 【S2】.');
+    expect(claims).toHaveLength(2);
+    expect(claims[0].sourceLabels).toEqual(['S1']);
+    expect(claims[1].sourceLabels).toEqual(['S2']);
+  });
+
   test('returns empty for empty answers', () => {
     expect(parseClaims('')).toEqual([]);
   });
@@ -152,5 +170,16 @@ describe('verifyAnswer', () => {
 
     expect(result.status).toBe('verified');
     expect(result.score).toBe(100);
+  });
+
+  test('scores fullwidth-cited claims instead of marking them uncited', async () => {
+    mockChat.mockResolvedValue('[{"id": 0, "status": "supported"}]');
+
+    const result = await verifyAnswer('Employees get 20 days of leave 【S1】.', SOURCES);
+
+    expect(result.status).toBe('verified');
+    expect(result.score).toBe(100);
+    expect(result.claims[0].status).toBe('supported');
+    expect(mockChat).toHaveBeenCalledTimes(1);
   });
 });

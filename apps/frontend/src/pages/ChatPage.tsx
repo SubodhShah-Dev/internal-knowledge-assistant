@@ -25,7 +25,7 @@ export default function ChatPage() {
   const { conversationId: conversationIdParam } = useParams<{ conversationId: string }>();
   const conversationId = conversationIdParam ? Number(conversationIdParam) : null;
   const navigate = useNavigate();
-  const { refreshSessions, onUnauthorized, onOpenDocuments, onToggleSidebar, sidebarVisible, title, attachedDocIds, setAttachedDocIds } =
+  const { refreshSessions, refreshUsage, onUnauthorized, onOpenDocuments, onToggleSidebar, sidebarVisible, title, attachedDocIds, setAttachedDocIds } =
     useOutletContext<RootOutletContext>();
 
   const [messages, setMessages] = useState<ThreadMessage[]>([]);
@@ -166,11 +166,13 @@ export default function ChatPage() {
           onVerification: (verification: Verification) => updateAssistant({ verification }),
           onError: message => updateAssistant({ streaming: false, error: message }),
           onDone: payload => {
-            updateAssistant({ streaming: false });
+            // Snap to the server's canonical answer (citation brackets normalized).
+            updateAssistant({ streaming: false, text: payload.answer });
             if (conversationId === null) {
               navigate(`/c/${payload.conversationId}`, { replace: true });
             }
             void refreshSessions();
+            void refreshUsage();
           }
         }, docIds);
         // Stream ended without done (e.g. abort) — settle the bubble.
@@ -191,7 +193,7 @@ export default function ChatPage() {
         abortRef.current = null;
       }
     },
-    [busy, conversationId, attachedDocIds, messages.length, navigate, onUnauthorized, refreshSessions]
+    [busy, conversationId, attachedDocIds, messages.length, navigate, onUnauthorized, refreshSessions, refreshUsage]
   );
 
   function handleStop() {

@@ -104,6 +104,13 @@ CREATE TABLE IF NOT EXISTS models (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- Ensure at most one model is marked default. The dedupe is idempotent
+-- (no-op when zero or one default already exists).
+UPDATE models SET is_default = false WHERE id NOT IN (
+  SELECT id FROM models WHERE is_default = true ORDER BY sort_order, created_at LIMIT 1
+);
+CREATE UNIQUE INDEX IF NOT EXISTS models_single_default ON models ((true)) WHERE is_default;
+
 CREATE TABLE IF NOT EXISTS app_settings (
   key text PRIMARY KEY,
   value text NOT NULL,

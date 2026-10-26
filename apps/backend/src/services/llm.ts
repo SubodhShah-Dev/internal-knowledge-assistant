@@ -11,6 +11,8 @@
  *   LLM_TIMEOUT_MS - per-request timeout (default 60s)
  */
 
+import { recordProviderLimits } from './rateLimits';
+
 export type ChatMessage = {
   role: 'system' | 'user' | 'assistant';
   content: string;
@@ -23,7 +25,7 @@ export class LlmUnavailableError extends Error {
   }
 }
 
-type LlmConfig = {
+export type LlmConfig = {
   baseUrl: string;
   apiKey: string;
   model: string;
@@ -74,8 +76,12 @@ export async function chat(
 
   if (!response.ok) {
     const detail = (await response.text().catch(() => '')).slice(0, 300);
+    // Providers report key limits on failures too (e.g. 429), so capture them.
+    recordProviderLimits(model, baseUrl, response.headers);
     throw new LlmUnavailableError(`LLM provider responded ${response.status}. ${detail}`);
   }
+
+  recordProviderLimits(model, baseUrl, response.headers);
 
   const data: any = await response.json().catch(() => null);
   const content = data?.choices?.[0]?.message?.content;
@@ -125,8 +131,11 @@ export async function* chatStream(
 
   if (!response.ok || !response.body) {
     const detail = (await response.text().catch(() => '')).slice(0, 300);
+    recordProviderLimits(model, baseUrl, response.headers);
     throw new LlmUnavailableError(`LLM provider responded ${response.status}. ${detail}`);
   }
+
+  recordProviderLimits(model, baseUrl, response.headers);
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder();

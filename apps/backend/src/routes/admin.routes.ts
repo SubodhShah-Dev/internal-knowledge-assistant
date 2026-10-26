@@ -10,7 +10,8 @@ export const adminRouter = Router();
 adminRouter.get('/admin/models', requireAuth, requireAdmin, async (_req, res, next) => {
   try {
     const { rows } = await pool.query(
-      `SELECT id, label, model_id, base_url, is_enabled, is_default, sort_order, created_at
+      `SELECT id, label, model_id, base_url, is_enabled, is_default, sort_order, created_at,
+              (api_key IS NOT NULL) AS has_api_key
        FROM models
        ORDER BY sort_order ASC, label ASC`
     );
@@ -32,10 +33,11 @@ adminRouter.post('/admin/models', requireAuth, requireAdmin, async (req, res, ne
     const { rows } = await pool.query(
       `INSERT INTO models (label, model_id, base_url, api_key, is_enabled, is_default, sort_order)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING id, label, model_id, base_url, is_enabled, is_default, sort_order, created_at`,
+       RETURNING id, label, model_id, base_url, api_key, is_enabled, is_default, sort_order, created_at`,
       [label, model_id, base_url ?? null, api_key ?? null, is_enabled ?? true, is_default ?? false, sort_order ?? 0]
     );
-    res.status(201).json({ ...rows[0], has_api_key: Boolean(rows[0].api_key) });
+    const { api_key: _, ...modelWithoutKey } = rows[0];
+    res.status(201).json({ ...modelWithoutKey, has_api_key: Boolean(rows[0].api_key) });
   } catch (error) {
     next(error);
   }
@@ -51,7 +53,8 @@ adminRouter.get('/admin/models/:id', requireAuth, requireAdmin, async (req, res,
     if (!rows[0]) {
       return res.status(404).json({ error: 'Model not found.' });
     }
-    res.json(rows[0]);
+    const { api_key: _, ...modelWithoutKey } = rows[0];
+    res.json({ ...modelWithoutKey, has_api_key: Boolean(rows[0].api_key) });
   } catch (error) {
     next(error);
   }
@@ -76,24 +79,57 @@ adminRouter.patch('/admin/models/:id', requireAuth, requireAdmin, async (req, re
            is_default = COALESCE($7, is_default),
            sort_order = COALESCE($8, sort_order)
        WHERE id = $1
-       RETURNING id, label, model_id, base_url, is_enabled, is_default, sort_order, created_at`,
+       RETURNING id, label, model_id, base_url, api_key, is_enabled, is_default, sort_order, created_at`,
       [id, label, model_id, base_url, api_key, is_enabled, is_default, sort_order]
     );
     if (!rows[0]) {
       return res.status(404).json({ error: 'Model not found.' });
     }
-    res.json({ ...rows[0], has_api_key: Boolean(rows[0].api_key) });
+    const { api_key: _, ...modelWithoutKey } = rows[0];
+    res.json({ ...modelWithoutKey, has_api_key: Boolean(rows[0].api_key) });
   } catch (error) {
     next(error);
   }
 });
 
-adminRouter.delete('/admin/models/:id', requireAuth, requireAdmin, async (req, res, next) => {
+adminRouter.post('/admin/models/:id/default', requireAuth, requireAdmin, async (req, res, next) => {
+  const client = await pool.connect();
   try {
-    const { rows } = await pool.query('DELETE FROM models WHERE id = $1 RETURNING id', [req.params.id]);
-    if (!rows[0]) {
+    await client.query('BEGIN');
+    const { rows: modelRows } = await client.query('SELECT id FROM models WHERE id = $1', [req.params.id]);
+    if (!modelRows[0]) {
+      await client.query('ROLLBACK').catch(() => undefined);
       return res.status(404).json({ error: 'Model not found.' });
     }
+    await client.query('UPDATE models SET is_default = false WHERE is_default = true');
+    await client.query('UPDATE models SET is_default = true WHERE id = $1', [req.params.id]);
+    await client.query('COMMIT');
+
+    const { rows } = await pool.query(
+      `SELECT id, label, model_id, base_url, api_key, is_enabled, is_default, sort_order, created_at
+       FROM models WHERE id = $1`,
+      [req.params.id]
+    );
+    const { api_key: _, ...modelWithoutKey } = rows[0];
+    res.json({ ...modelWithoutKey, has_api_key: Boolean(rows[0].api_key) });
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    next(error);
+  } finally {
+    client.release();
+  }
+});
+
+adminRouter.delete('/admin/models/:id', requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const { rows: guardRows } = await pool.query('SELECT is_default FROM models WHERE id = $1', [req.params.id]);
+    if (!guardRows[0]) {
+      return res.status(404).json({ error: 'Model not found.' });
+    }
+    if (guardRows[0].is_default) {
+      return res.status(409).json({ error: 'Cannot delete the default model. Set another model as default first.' });
+    }
+    const { rows } = await pool.query('DELETE FROM models WHERE id = $1 RETURNING id', [req.params.id]);
     res.status(204).send();
   } catch (error) {
     next(error);
@@ -177,6 +213,43 @@ adminRouter.patch('/admin/settings', requireAuth, requireAdmin, async (req, res,
     } finally {
       client.release();
     }
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ----- Admin-only: effective (default) model -----
+
+function hostOf(url?: string | null): string | null {
+  if (!url) return null;
+  try {
+    return new URL(url).host;
+  } catch {
+    return null;
+  }
+}
+
+adminRouter.get('/admin/current-model', requireAuth, requireAdmin, async (_req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT model_id, base_url FROM models WHERE is_enabled = true AND is_default = true LIMIT 1`
+    );
+    if (rows[0]) {
+      res.json({
+        model_id: rows[0].model_id,
+        base_url: rows[0].base_url ?? null,
+        provider: hostOf(rows[0].base_url),
+        source: 'database'
+      });
+      return;
+    }
+    const baseUrl = process.env.LLM_BASE_URL ?? null;
+    res.json({
+      model_id: process.env.LLM_MODEL ?? null,
+      base_url: baseUrl,
+      provider: hostOf(baseUrl),
+      source: 'environment'
+    });
   } catch (error) {
     next(error);
   }
