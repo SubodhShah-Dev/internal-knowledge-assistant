@@ -5,10 +5,18 @@ async function seed() {
   const passwordHash = await bcrypt.hash('DemoPassword123!', 12);
 
   const user = await pool.query(
-    `INSERT INTO users(email, password_hash) VALUES ($1, $2)
+    `INSERT INTO users(email, password_hash, role) VALUES ($1, $2, 'user')
      ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash
      RETURNING id`,
     ['demo@example.com', passwordHash]
+  );
+
+  const adminPasswordHash = await bcrypt.hash('AdminPassword123!', 12);
+  await pool.query(
+    `INSERT INTO users(email, password_hash, role) VALUES ($1, $2, 'admin')
+     ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash, role = EXCLUDED.role
+     RETURNING id`,
+    ['admin@example.com', adminPasswordHash]
   );
 
   const userId = user.rows[0].id;
@@ -34,7 +42,7 @@ async function seed() {
     [documentId, 0, 'The sample policy provides 15 days of annual leave per year. Employees must submit time-off requests at least two weeks in advance.']
   );
 
-  console.log('Seed completed. Demo user created.');
+  console.log('Seed completed. Demo user and admin created.');
   await pool.end();
 }
 

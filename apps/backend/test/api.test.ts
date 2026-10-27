@@ -9,6 +9,7 @@ import request from 'supertest';
 import { app } from '../src/app';
 import { pool } from '../src/db';
 import { chat, chatStream, LlmUnavailableError } from '../src/services/llm';
+import { recordProviderLimits, resetProviderLimits } from '../src/services/rateLimits';
 
 const mockChat = chat as jest.MockedFunction<typeof chat>;
 const mockChatStream = chatStream as jest.MockedFunction<typeof chatStream>;
@@ -572,5 +573,248 @@ describe('streaming (SSE)', () => {
     expect(res.status).toBe(200);
     expect(res.text as string).toContain('event: error');
     expect(res.text as string).toContain('language model is unavailable');
+  });
+});
+
+describe('documents view and search', () => {
+  test('GET /api/documents/:id returns ordered chunks; owner-scoped; invalid id 404s', async () => {
+    const a = await signupUser();
+    const b = await signupUser();
+    const uploaded = await uploadTxt(a.token);
+    const documentId = uploaded.body.document.id as string;
+
+    const view = await request(app)
+      .get(`/api/documents/${documentId}`)
+      .set('Authorization', `Bearer ${a.token}`);
+    expect(view.status).toBe(200);
+    expect(view.body.document.id).toBe(documentId);
+    expect(view.body.totalChunks).toBeGreaterThanOrEqual(1);
+    expect(view.body.chunks[0].chunk_index).toBe(0);
+    expect(view.body.chunks[0].content).toContain('Acme Remote Work Policy');
+
+    const viewB = await request(app)
+      .get(`/api/documents/${documentId}`)
+      .set('Authorization', `Bearer ${b.token}`);
+    expect(viewB.status).toBe(404);
+
+    const invalid = await request(app)
+      .get('/api/documents/not-a-uuid')
+      .set('Authorization', `Bearer ${a.token}`);
+    expect(invalid.status).toBe(404);
+  });
+
+  test('list includes chunk_count; search matches title and content with excerpts', async () => {
+    const { token } = await signupUser();
+    await uploadTxt(
+      token,
+      'Acme Remote Work Policy. Employees may work remotely up to three days per week with manager approval.',
+      'remote.txt'
+    );
+    await uploadTxt(
+      token,
+      'Quarterly budget report. Revenue grew by four percent in Q3 after the price changes.',
+      'budget.txt'
+    );
+
+    const list = await request(app).get('/api/documents').set('Authorization', `Bearer ${token}`);
+    expect(list.status).toBe(200);
+    expect(list.body).toHaveLength(2);
+    for (const row of list.body) {
+      expect(Number(row.chunk_count)).toBeGreaterThanOrEqual(1);
+    }
+
+    const byTitle = await request(app)
+      .get('/api/documents?q=budget')
+      .set('Authorization', `Bearer ${token}`);
+    expect(byTitle.status).toBe(200);
+    expect(byTitle.body).toHaveLength(1);
+    expect(byTitle.body[0].title).toBe('budget');
+
+    const byContent = await request(app)
+      .get('/api/documents?q=remotely')
+      .set('Authorization', `Bearer ${token}`);
+    expect(byContent.status).toBe(200);
+    const match = byContent.body.find((row: any) => row.title === 'remote');
+    expect(match).toBeTruthy();
+    expect(match.match_excerpt).toBeTruthy();
+    expect(match.match_excerpt).toContain('<<remotely>>');
+
+    const noMatch = await request(app)
+      .get('/api/documents?q=zxqqaall')
+      .set('Authorization', `Bearer ${token}`);
+    expect(noMatch.body).toEqual([]);
+  });
+});
+
+describe('provider limits reporting', () => {
+  beforeEach(() => {
+    resetProviderLimits();
+  });
+
+  test('GET /api/usage reports the provider rate-limit snapshot', async () => {
+    const { token } = await signupUser();
+    recordProviderLimits(
+      'openai/gpt-oss-120b',
+      'https://api.groq.com/openai/v1',
+      new Headers({
+        'x-ratelimit-limit-requests': '30',
+        'x-ratelimit-remaining-requests': '28',
+        'x-ratelimit-reset-requests': '42s',
+        'x-ratelimit-limit-tokens': '12000',
+        'x-ratelimit-remaining-tokens': '9500',
+        'x-ratelimit-reset-tokens': '42s'
+      })
+    );
+
+    const res = await request(app).get('/api/usage').set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.available).toBe(true);
+    expect(res.body.model).toBe('openai/gpt-oss-120b');
+    expect(res.body.provider).toBe('api.groq.com');
+    expect(res.body.requests.limit).toBe(30);
+    expect(res.body.requests.remaining).toBe(28);
+    expect(res.body.requests.resetAt).toBeTruthy();
+    expect(res.body.tokens.limit).toBe(12000);
+    expect(res.body.tokens.remaining).toBe(9500);
+  });
+
+  test('reports no limits until the provider sends them', async () => {
+    const { token } = await signupUser();
+    const res = await request(app).get('/api/usage').set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.available).toBe(false);
+  });
+
+  test('asking a question is never blocked by a limit', async () => {
+    const { token } = await signupUser();
+    await uploadTxt(token);
+    mockChat
+      .mockResolvedValueOnce('Employees may work remotely three days per week [S1].')
+      .mockResolvedValueOnce('[{"id": 0, "status": "supported"}]');
+
+    const res = await request(app)
+      .post('/api/questions')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ question: 'How many remote days per week are allowed?' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.answer).toContain('[S1]');
+  });
+});
+
+describe('conversational memory', () => {
+  async function seedGroundedTurn(token: string) {
+    await uploadTxt(token);
+    mockChat
+      .mockResolvedValueOnce('Employees may work remotely three days per week [S1].')
+      .mockResolvedValueOnce('[{"id": 0, "status": "supported"}]');
+    const first = await request(app)
+      .post('/api/questions')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ question: 'How many remote days per week are allowed?' });
+    expect(first.status).toBe(200);
+    return first.body.conversationId as number;
+  }
+
+  test('zero-hit follow-up rewrites the query via history and answers from evidence', async () => {
+    const { token } = await signupUser();
+    const conversationId = await seedGroundedTurn(token);
+
+    // Follow-up tokens (signs/zzzq/quixotic/plan) match nothing; the rewrite
+    // call resolves the context so retrieval can find the policy chunk.
+    mockChat
+      .mockResolvedValueOnce('remote days per week approval')
+      .mockResolvedValueOnce('Manager approval is required for remote work [S1].')
+      .mockResolvedValueOnce('[{"id": 0, "status": "supported"}]');
+
+    const second = await request(app)
+      .post('/api/questions')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        question: 'and who signs off on zzzq quixotic plans?',
+        conversationId
+      });
+
+    expect(second.status).toBe(200);
+    expect(second.body.sources).toHaveLength(1);
+
+    // calls[2] is the rewrite prompt; it must carry the prior conversation.
+    const rewriteMessages = mockChat.mock.calls[2][0];
+    const rewriteJoined = rewriteMessages.map((m: any) => m.content).join('\n');
+    expect(rewriteJoined).toContain('How many remote days per week are allowed?');
+    expect(rewriteJoined).toContain('and who signs off on zzzq quixotic plans?');
+
+    // calls[3] is the grounded answer pass of the follow-up.
+    const ragMessages = mockChat.mock.calls[3][0];
+    expect(ragMessages.some((m: any) => m.content.includes('and who signs off'))).toBe(true);
+  });
+
+  test('fallback answers from conversation when even the rewrite finds nothing', async () => {
+    const { token } = await signupUser();
+    const conversationId = await seedGroundedTurn(token);
+
+    mockChat
+      .mockResolvedValueOnce('zzq waldo frobnicate') // rewrite: still no evidence
+      .mockResolvedValueOnce('You asked how many remote days are allowed — three per week.');
+
+    const second = await request(app)
+      .post('/api/questions')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ question: 'zzq waldo quixotic frobnicate', conversationId });
+
+    expect(second.status).toBe(200);
+    expect(second.body.answer).toContain('You asked how many');
+    expect(second.body.sources).toEqual([]);
+    expect(second.body.verification).toBeNull();
+
+    const fallbackMessages = mockChat.mock.calls[3][0];
+    const joined = fallbackMessages.map((m: any) => m.content).join('\n');
+    expect(joined).toContain('No document excerpts matched');
+    expect(joined).toContain('How many remote days per week are allowed?');
+    expect(mockChat).toHaveBeenCalledTimes(4); // t1 answer, t1 verifier, rewrite, fallback
+  });
+
+  test('first-turn zero-hit still returns the canned abstention without any LLM call', async () => {
+    const { token } = await signupUser();
+    await uploadTxt(token);
+    const res = await request(app)
+      .post('/api/questions')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ question: 'xylophone quantum zebra bicycle expedition' });
+    expect(res.status).toBe(200);
+    expect(res.body.answer).toMatch(/couldn't find/i);
+    expect(mockChat).not.toHaveBeenCalled();
+  });
+
+  test('SSE conversational fallback streams, skips verification, and persists', async () => {
+    const { token } = await signupUser();
+    const conversationId = await seedGroundedTurn(token);
+
+    mockChat.mockResolvedValueOnce('zzq waldo frobnicate'); // rewrite: no evidence
+    mockChatStream.mockImplementation(() =>
+      (async function* () {
+        yield 'From the conversation: ';
+        yield 'three days per week.';
+      })()
+    );
+
+    const res = await request(app)
+      .post('/api/questions')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Accept', 'text/event-stream')
+      .send({ question: 'zzq waldo quixotic frobnicate', conversationId });
+
+    expect(res.status).toBe(200);
+    expect(res.text as string).toContain('three days per week');
+    expect(res.text as string).not.toContain('event: verification');
+    expect(res.text as string).toContain('event: done');
+    expect(mockChat).toHaveBeenCalledTimes(3); // t1 answer, t1 verifier, rewrite
+
+    const detail = await request(app)
+      .get(`/api/conversations/${conversationId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(detail.body.turns).toHaveLength(2);
+    expect(detail.body.turns[1].sources).toEqual([]);
+    expect(detail.body.turns[1].verification).toBeNull();
   });
 });

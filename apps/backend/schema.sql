@@ -70,3 +70,55 @@ CREATE TABLE IF NOT EXISTS answer_verifications (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS answer_verifications_qa_idx ON answer_verifications(qa_history_id);
+
+CREATE TABLE IF NOT EXISTS conversation_documents (
+  conversation_id bigint NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  document_id uuid NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  PRIMARY KEY (conversation_id, document_id)
+);
+CREATE INDEX IF NOT EXISTS conversation_documents_doc_idx ON conversation_documents(document_id);
+
+-- Backfill legacy conversations to include all documents for a user.
+-- Use a DO block to run DML only if the table is empty and only once.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM conversation_documents) THEN
+    INSERT INTO conversation_documents (conversation_id, document_id)
+    SELECT c.id, d.id
+    FROM conversations c
+    JOIN documents d ON d.owner_id = c.user_id;
+  END IF;
+END;
+$$;
+
+-- Admin CMS: configurable models and app settings.
+CREATE TABLE IF NOT EXISTS models (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  label text NOT NULL,
+  model_id text NOT NULL UNIQUE,
+  base_url text,
+  api_key text,
+  is_enabled boolean NOT NULL DEFAULT true,
+  is_default boolean NOT NULL DEFAULT false,
+  sort_order integer NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Ensure at most one model is marked default. The dedupe is idempotent
+-- (no-op when zero or one default already exists).
+UPDATE models SET is_default = false WHERE id NOT IN (
+  SELECT id FROM models WHERE is_default = true ORDER BY sort_order, created_at LIMIT 1
+);
+CREATE UNIQUE INDEX IF NOT EXISTS models_single_default ON models ((true)) WHERE is_default;
+
+CREATE TABLE IF NOT EXISTS app_settings (
+  key text PRIMARY KEY,
+  value text NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Session's chosen model (NULL = use default/env fallback).
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS model_id uuid REFERENCES models(id) ON DELETE SET NULL;
+
+-- Audit: which model answered each turn.
+ALTER TABLE qa_history ADD COLUMN IF NOT EXISTS model text;

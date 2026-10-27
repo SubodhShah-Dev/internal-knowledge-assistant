@@ -1,9 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useOutletContext, useParams } from 'react-router-dom';
-import { ApiError, askQuestionStream, getConversation } from '../api/client';
-import type { ThreadMessage, Verification } from '../types';
+import {
+  ApiError,
+  askQuestionStream,
+  attachDocument,
+  detachDocument,
+  getConversation,
+  listDocuments
+} from '../api/client';
+import type { DocumentMeta, ThreadMessage, Verification } from '../types';
 import ChatMessage from '../components/ChatMessage';
 import Composer from '../components/Composer';
+import AttachedDocsChips from '../components/AttachedDocsChips';
 import { IconHamburger, IconSpark } from '../components/icons';
 import type { RootOutletContext } from '../router';
 
@@ -17,7 +25,7 @@ export default function ChatPage() {
   const { conversationId: conversationIdParam } = useParams<{ conversationId: string }>();
   const conversationId = conversationIdParam ? Number(conversationIdParam) : null;
   const navigate = useNavigate();
-  const { refreshSessions, onUnauthorized, onOpenDocuments, onToggleSidebar, title } =
+  const { refreshSessions, refreshUsage, onUnauthorized, onOpenDocuments, onToggleSidebar, sidebarVisible, title, attachedDocIds, setAttachedDocIds } =
     useOutletContext<RootOutletContext>();
 
   const [messages, setMessages] = useState<ThreadMessage[]>([]);
@@ -25,18 +33,45 @@ export default function ChatPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [loadingThread, setLoadingThread] = useState(false);
+  const [availableDocuments, setAvailableDocuments] = useState<DocumentMeta[]>([]);
 
   const abortRef = useRef<AbortController | null>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
+
+  const handleDetach = useCallback(
+    async (documentId: string) => {
+      setAttachedDocIds(attachedDocIds.filter(id => id !== documentId));
+      if (conversationId) {
+        try {
+          await detachDocument(conversationId, documentId);
+        } catch {
+          // Ignore detach errors; UI remains consistent.
+        }
+      }
+    },
+    [conversationId, attachedDocIds, setAttachedDocIds]
+  );
 
   // Load an existing conversation thread.
   useEffect(() => {
     let cancelled = false;
     setMessages([]);
     setError('');
+    setAttachedDocIds([]);
+    setAvailableDocuments([]);
     if (conversationId === null || Number.isNaN(conversationId)) {
       if (conversationIdParam) navigate('/', { replace: true });
+      // New chat: load library and attach all docs by default.
+      void listDocuments()
+        .then(docs => {
+          if (cancelled) return;
+          setAvailableDocuments(docs);
+          setAttachedDocIds(docs.map(d => d.id));
+        })
+        .catch(() => {
+          // Non-fatal; chips row simply stays empty.
+        });
       return;
     }
     setLoadingThread(true);
@@ -54,6 +89,8 @@ export default function ChatPage() {
           }
         ]);
         setMessages(loaded);
+        setAttachedDocIds(detail.documents.map(d => d.id));
+        setAvailableDocuments(detail.documents);
       })
       .catch(err => {
         if (cancelled) return;
@@ -68,7 +105,7 @@ export default function ChatPage() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversationIdParam]);
+  }, [conversationIdParam, onUnauthorized, navigate]);
 
   // Auto-scroll while streaming.
   useEffect(() => {
@@ -111,6 +148,9 @@ export default function ChatPage() {
         );
       };
 
+      // Only pass documentIds on first ask (new conversation).
+      const docIds = conversationId === null ? attachedDocIds : undefined;
+
       try {
         await askQuestionStream(trimmed, conversationId ?? undefined, {
           signal: controller.signal,
@@ -126,13 +166,15 @@ export default function ChatPage() {
           onVerification: (verification: Verification) => updateAssistant({ verification }),
           onError: message => updateAssistant({ streaming: false, error: message }),
           onDone: payload => {
-            updateAssistant({ streaming: false });
+            // Snap to the server's canonical answer (citation brackets normalized).
+            updateAssistant({ streaming: false, text: payload.answer });
             if (conversationId === null) {
               navigate(`/c/${payload.conversationId}`, { replace: true });
             }
             void refreshSessions();
+            void refreshUsage();
           }
-        });
+        }, docIds);
         // Stream ended without done (e.g. abort) — settle the bubble.
         updateAssistant({ streaming: false });
       } catch (err) {
@@ -151,7 +193,7 @@ export default function ChatPage() {
         abortRef.current = null;
       }
     },
-    [busy, conversationId, messages.length, navigate, onUnauthorized, refreshSessions]
+    [busy, conversationId, attachedDocIds, messages.length, navigate, onUnauthorized, refreshSessions, refreshUsage]
   );
 
   function handleStop() {
@@ -165,7 +207,8 @@ export default function ChatPage() {
       <header className="main-header">
         <button
           className="btn btn-ghost btn-icon hamburger"
-          aria-label="Open sidebar"
+          aria-label="Toggle sidebar"
+          aria-expanded={sidebarVisible}
           onClick={onToggleSidebar}
         >
           <IconHamburger size={18} />
@@ -199,6 +242,15 @@ export default function ChatPage() {
                 </button>
               ))}
             </div>
+            {conversationId === null && availableDocuments.length > 0 && (
+              <AttachedDocsChips
+                conversationId={null}
+                attachedDocIds={attachedDocIds}
+                documents={availableDocuments}
+                onDetach={handleDetach}
+                onToggle={() => {}}
+              />
+            )}
           </div>
         ) : (
           <div className="thread-inner">

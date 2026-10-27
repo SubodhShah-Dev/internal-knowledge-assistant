@@ -3,8 +3,10 @@ import type {
   AuthResponse,
   ConversationDetail,
   ConversationSummary,
+  DocumentDetail,
   DocumentMeta,
   Source,
+  UsageSnapshot,
   Verification
 } from '../types';
 
@@ -13,6 +15,7 @@ import type {
 const API = import.meta.env.VITE_API_URL ?? '/api';
 
 const TOKEN_KEY = 'token';
+const ADMIN_TOKEN_KEY = 'admin_token';
 
 export class ApiError extends Error {
   status: number;
@@ -34,6 +37,18 @@ export function setToken(token: string): void {
 
 export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
+}
+
+export function getAdminToken(): string {
+  return localStorage.getItem(ADMIN_TOKEN_KEY) ?? '';
+}
+
+export function setAdminToken(token: string): void {
+  localStorage.setItem(ADMIN_TOKEN_KEY, token);
+}
+
+export function clearAdminToken(): void {
+  localStorage.removeItem(ADMIN_TOKEN_KEY);
 }
 
 async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -58,6 +73,109 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
   return data as T;
 }
 
+async function apiAdminFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const headers = new Headers(options.headers);
+  const token = getAdminToken();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  if (options.body && !(options.body instanceof FormData)) {
+    headers.set('Content-Type', 'application/json');
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${API}${path}`, { ...options, headers });
+  } catch {
+    throw new ApiError(0, 'Could not reach the server. Is the API running?');
+  }
+
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new ApiError(response.status, data?.error ?? `Request failed (${response.status}).`);
+  }
+  return data as T;
+}
+
+export type AdminModel = {
+  id: string;
+  label: string;
+  model_id: string;
+  base_url: string | null;
+  is_enabled: boolean;
+  is_default: boolean;
+  sort_order: number;
+  created_at: string;
+  has_api_key: boolean;
+};
+
+export async function listAdminModels(): Promise<AdminModel[]> {
+  return apiAdminFetch<AdminModel[]>('/admin/models');
+}
+
+export async function createAdminModel(model: {
+  label: string;
+  model_id: string;
+  base_url?: string | null;
+  api_key?: string | null;
+  is_enabled?: boolean;
+  is_default?: boolean;
+  sort_order?: number;
+}): Promise<AdminModel> {
+  return apiAdminFetch<AdminModel>('/admin/models', {
+    method: 'POST',
+    body: JSON.stringify(model)
+  });
+}
+
+export async function updateAdminModel(id: string, model: Partial<{
+  label: string;
+  model_id: string;
+  base_url: string | null;
+  api_key: string | null;
+  is_enabled: boolean;
+  is_default: boolean;
+  sort_order: number;
+}>): Promise<AdminModel> {
+  return apiAdminFetch<AdminModel>(`/admin/models/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(model)
+  });
+}
+
+export async function deleteAdminModel(id: string): Promise<void> {
+  await apiAdminFetch<void>(`/admin/models/${id}`, { method: 'DELETE' });
+}
+
+export async function testAdminModel(id: string): Promise<{ ok: boolean; error?: string }> {
+  return apiAdminFetch<{ ok: boolean; error?: string }>(`/admin/models/${id}/test`, {
+    method: 'POST'
+  });
+}
+
+export async function getAdminSettings(): Promise<Record<string, string>> {
+  return apiAdminFetch<Record<string, string>>('/admin/settings');
+}
+
+export async function updateAdminSettings(settings: Record<string, string>): Promise<{ ok: boolean }> {
+  return apiAdminFetch<{ ok: boolean }>('/admin/settings', {
+    method: 'PATCH',
+    body: JSON.stringify(settings)
+  });
+}
+
+export async function getEnabledModels(): Promise<Array<{ id: string; label: string; model_id: string; is_default: boolean }>> {
+  return apiFetch<Array<{ id: string; label: string; model_id: string; is_default: boolean }>>('/models');
+}
+
+export async function getCurrentModel(): Promise<{ model_id: string | null; base_url: string | null; provider: string | null; source: string | null }> {
+  return apiAdminFetch<{ model_id: string | null; base_url: string | null; provider: string | null; source: string | null }>('/admin/current-model');
+}
+
+export async function setDefaultModel(modelId: string): Promise<{ ok: boolean }> {
+  return apiAdminFetch<{ ok: boolean }>(`/admin/models/${modelId}/default`, {
+    method: 'POST'
+  });
+}
+
 export async function signup(email: string, password: string): Promise<AuthResponse> {
   return apiFetch<AuthResponse>('/auth/signup', {
     method: 'POST',
@@ -79,14 +197,24 @@ export async function uploadDocument(file: File): Promise<{ document: DocumentMe
   return apiFetch('/documents', { method: 'POST', body: form });
 }
 
-export async function listDocuments(): Promise<DocumentMeta[]> {
-  return apiFetch<DocumentMeta[]>('/documents');
+export async function listDocuments(query?: string): Promise<DocumentMeta[]> {
+  const trimmed = query?.trim();
+  const qs = trimmed ? `?q=${encodeURIComponent(trimmed)}` : '';
+  return apiFetch<DocumentMeta[]>(`/documents${qs}`);
 }
 
-export async function askQuestion(question: string, conversationId?: number): Promise<AskResponse> {
+export async function getDocument(documentId: string): Promise<DocumentDetail> {
+  return apiFetch<DocumentDetail>(`/documents/${documentId}`);
+}
+
+export async function getUsage(): Promise<UsageSnapshot> {
+  return apiFetch<UsageSnapshot>('/usage');
+}
+
+export async function askQuestion(question: string, conversationId?: number, documentIds?: string[], modelId?: string): Promise<AskResponse> {
   return apiFetch<AskResponse>('/questions', {
     method: 'POST',
-    body: JSON.stringify(conversationId ? { question, conversationId } : { question })
+    body: JSON.stringify({ question, conversationId, documentIds, modelId })
   });
 }
 
@@ -117,11 +245,28 @@ export async function deleteConversation(id: number): Promise<void> {
   await apiFetch<{ ok: boolean }>(`/conversations/${id}`, { method: 'DELETE' });
 }
 
+export async function attachDocument(conversationId: number, documentId: string): Promise<void> {
+  await apiFetch<void>(`/conversations/${conversationId}/documents`, {
+    method: 'POST',
+    body: JSON.stringify({ documentId })
+  });
+}
+
+export async function detachDocument(conversationId: number, documentId: string): Promise<void> {
+  await apiFetch<void>(`/conversations/${conversationId}/documents/${documentId}`, {
+    method: 'DELETE'
+  });
+}
+
+export async function deleteDocument(documentId: string): Promise<void> {
+  await apiFetch<void>(`/documents/${documentId}`, { method: 'DELETE' });
+}
+
 export type StreamHandlers = {
   onSources?: (sources: Source[]) => void;
   onToken?: (text: string) => void;
   onVerification?: (verification: Verification) => void;
-  onDone?: (payload: { conversationId: number; messageId: number; answer: string }) => void;
+  onDone?: (payload: { conversationId: number; messageId: number; answer: string; model?: string }) => void;
   onError?: (message: string) => void;
   signal?: AbortSignal;
 };
@@ -134,7 +279,9 @@ export type StreamHandlers = {
 export async function askQuestionStream(
   question: string,
   conversationId: number | undefined,
-  handlers: StreamHandlers
+  handlers: StreamHandlers,
+  documentIds?: string[],
+  modelId?: string
 ): Promise<void> {
   const headers = new Headers({ 'Content-Type': 'application/json', Accept: 'text/event-stream' });
   const token = getToken();
@@ -145,7 +292,7 @@ export async function askQuestionStream(
     response = await fetch(`${API}/questions`, {
       method: 'POST',
       headers,
-      body: JSON.stringify(conversationId ? { question, conversationId } : { question }),
+      body: JSON.stringify({ question, conversationId, documentIds, modelId }),
       signal: handlers.signal ?? null
     });
   } catch (error: any) {
@@ -206,7 +353,8 @@ export async function askQuestionStream(
         handlers.onDone?.({
           conversationId: Number(parsed.conversationId),
           messageId: Number(parsed.messageId),
-          answer: String(parsed.answer ?? '')
+          answer: String(parsed.answer ?? ''),
+          model: parsed.model ?? undefined
         });
         break;
       case 'error':

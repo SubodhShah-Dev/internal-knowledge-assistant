@@ -34,14 +34,44 @@ const uploadDir = path.isAbsolute(configuredUploadDir)
 
 documentsRouter.get('/', requireAuth, async (req, res, next) => {
   try {
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    const chunkCount = `(SELECT count(*)::int FROM document_chunks cc WHERE cc.document_id = d.id) AS chunk_count`;
+
+    if (!q) {
+      const { rows } = await pool.query(
+        `SELECT d.id, d.title, d.original_name, d.byte_size, d.created_at,
+                ${chunkCount}
+         FROM documents d
+         WHERE d.owner_id = $1
+         ORDER BY d.created_at DESC`,
+        [req.user?.id]
+      );
+      return res.json(rows);
+    }
+
+    // Search: title substring match OR full-text match over chunk content.
+    // ts_headline highlights terms as <<term>> in the best-ranked chunk.
+    const tsQuery = `websearch_to_tsquery('english', $2)`;
     const { rows } = await pool.query(
-      `SELECT id, title, original_name, byte_size, created_at
-       FROM documents
-       WHERE owner_id = $1
-       ORDER BY created_at DESC`,
-      [req.user?.id]
+      `SELECT d.id, d.title, d.original_name, d.byte_size, d.created_at,
+              ${chunkCount},
+              (SELECT ts_headline('english', c.content, ${tsQuery},
+                   'StartSel=<<, StopSel=>>, MaxWords=35, MinWords=15, MaxFragments=1')
+               FROM document_chunks c
+               WHERE c.document_id = d.id AND c.search_vector @@ ${tsQuery}
+               ORDER BY ts_rank(c.search_vector, ${tsQuery}) DESC
+               LIMIT 1) AS match_excerpt
+       FROM documents d
+       WHERE d.owner_id = $1
+         AND (strpos(lower(d.title), lower($2)) > 0
+              OR EXISTS (
+                SELECT 1 FROM document_chunks c
+                WHERE c.document_id = d.id AND c.search_vector @@ ${tsQuery}
+              ))
+       ORDER BY (strpos(lower(d.title), lower($2)) > 0) DESC, d.created_at DESC`,
+      [req.user?.id, q]
     );
-    res.json(rows);
+    return res.json(rows);
   } catch (error) {
     next(error);
   }
@@ -107,6 +137,42 @@ documentsRouter.post('/', requireAuth, upload.single('file'), async (req, res, n
   }
 });
 
+documentsRouter.get('/:id', requireAuth, async (req, res, next) => {
+  try {
+    const id = String(req.params.id);
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!UUID_RE.test(id)) {
+      return res.status(404).json({ error: 'Document not found.' });
+    }
+
+    const { rows } = await pool.query(
+      `SELECT id, title, original_name, byte_size, created_at
+       FROM documents
+       WHERE id = $1 AND owner_id = $2`,
+      [id, req.user?.id]
+    );
+    if (!rows[0]) {
+      return res.status(404).json({ error: 'Document not found.' });
+    }
+
+    const MAX_CHUNKS = 200;
+    const { rows: chunkRows } = await pool.query(
+      `SELECT chunk_index, content
+       FROM document_chunks
+       WHERE document_id = $1
+       ORDER BY chunk_index`,
+      [id]
+    );
+    return res.json({
+      document: rows[0],
+      chunks: chunkRows.slice(0, MAX_CHUNKS),
+      totalChunks: chunkRows.length
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 documentsRouter.get('/:id/file', requireAuth, async (req, res, next) => {
   try {
     const { rows } = await pool.query(
@@ -121,5 +187,31 @@ documentsRouter.get('/:id/file', requireAuth, async (req, res, next) => {
     return res.download(rows[0].stored_path, rows[0].original_name);
   } catch (error) {
     next(error);
+  }
+});
+
+documentsRouter.delete('/:id', requireAuth, async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      `DELETE FROM documents WHERE id = $1 AND owner_id = $2 RETURNING stored_path`,
+      [id, req.user?.id]
+    );
+    if (!rows[0]) {
+      return res.status(404).json({ error: 'Document not found.' });
+    }
+    const { stored_path } = rows[0];
+    if (!stored_path.startsWith('seed://')) {
+      await unlink(stored_path).catch(() => undefined);
+    }
+    await client.query('COMMIT');
+    res.status(204).send();
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    next(error);
+  } finally {
+    client.release();
   }
 });

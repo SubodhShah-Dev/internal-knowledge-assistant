@@ -2,7 +2,10 @@ import { Fragment } from 'react';
 
 /** Renders **bold**, `code`, and [S1]-style citations without raw markdown. */
 export default function RichText({ text }: { text: string }) {
-  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`|\[S\d+\])/g);
+  // Models occasionally emit 【S1】/［S1］; canonicalize so both live stream and
+  // legacy stored rows render the citation pill instead of raw brackets.
+  const normalized = text.replace(/[【［]\s*(S\d+)\s*[】］]/g, '[$1]');
+  const parts = normalized.split(/(\*\*[^*]+\*\*|`[^`]+`|\[S\d+\])/g);
   return (
     <>
       {parts.map((part, index) => {

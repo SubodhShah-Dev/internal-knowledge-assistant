@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { ApiError, uploadDocument } from '../api/client';
 
 type Props = {
@@ -7,6 +7,8 @@ type Props = {
 };
 
 export default function UploadForm({ onUploaded, onUnauthorized }: Props) {
+  // Unique per instance: multiple UploadForms must never share an input id.
+  const inputId = useId();
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -40,11 +42,11 @@ export default function UploadForm({ onUploaded, onUnauthorized }: Props) {
   return (
     <div className="upload-box">
       <div className="upload-row">
-        <label className="file-label" htmlFor="doc-file">
+        <label className="file-label" htmlFor={inputId}>
           Document (PDF or TXT, max 10 MB)
         </label>
         <input
-          id="doc-file"
+          id={inputId}
           ref={inputRef}
           type="file"
           accept=".pdf,.txt"
